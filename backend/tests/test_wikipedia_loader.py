@@ -34,8 +34,8 @@ def nuevo_peleador(session, nombre, categoria="Lightweight", ufcstats_id=None):
     return fighter
 
 
-def evento(nombre, dia, pagina="pagina"):
-    return ScheduledEvent(name=nombre, date=dia, location="Meta Apex, Las Vegas", page=pagina)
+def evento(nombre, dia):
+    return ScheduledEvent(name=nombre, date=dia, location="Meta Apex, Las Vegas")
 
 
 def combate(f1, f2, categoria="Lightweight", titulo=False, estelar=False):
@@ -69,7 +69,7 @@ def test_crea_eventos_peleas_y_debutantes(session, conocidos):
             combate("Jiří Procházka", "Khalil Rountree", "Light Heavyweight"),
             combate("Brendan Allen", "Nuevo Debutante", "Catchweight (185 lb)"),
         ]),
-        (evento("UFC Fight Night 289", date(2026, 11, 22), pagina=None), None),
+        (evento("UFC Fight Night 289", date(2026, 11, 22)), None),
         (evento("UFC Fight Night: Ya celebrado", date(2026, 10, 10)), [combate("A Uno", "B Dos")]),
     ]
     report = sync_upcoming(session, schedule, HOY)
@@ -231,11 +231,16 @@ def test_no_toca_eventos_de_ufcstats_ni_peleas_con_resultado(session, conocidos)
 # Descarga: robots.txt decide si se usa la API o la página del artículo
 # ---------------------------------------------------------------------------
 
+# Título pedido -> (título de la página que se sirve, archivo). Si no
+# coinciden es una redirección: Wikipedia sirve la página de destino.
 PAGES = {
-    "List_of_UFC_events": "list_of_ufc_events.html",
-    "UFC_330": "event_card.html",
-    "UFC_Fight_Night:_Medić_vs._Rodriguez": "event_announced.html",
-}  # UFC_Fight_Night_287 no está: la web responde 404
+    "List_of_UFC_events": ("List of UFC events", "list_of_ufc_events.html"),
+    "UFC_330": ("UFC 330", "event_card.html"),
+    "UFC_Fight_Night:_Medić_vs._Rodriguez": ("UFC Fight Night: Medić vs. Rodriguez", "event_announced.html"),
+    # Sin página propia: redirige a la del año. Se le pone una cartelera
+    # para comprobar que no se lee como si fuera la del evento.
+    "UFC_Fight_Night_287": ("2026 in UFC", "event_card.html"),
+}  # El resto no existe: la API responde "missingtitle" y el artículo, 404
 
 
 def fake_wikipedia(robots: str | None, requests: list):
@@ -246,15 +251,19 @@ def fake_wikipedia(robots: str | None, requests: list):
         if path == "/robots.txt":
             return httpx.Response(200, text=robots) if robots else httpx.Response(404)
         if path == "/w/api.php":
-            name = PAGES.get(request.url.params["page"])
-            if name is None:
+            found = PAGES.get(request.url.params["page"])
+            if found is None:
                 return httpx.Response(200, json={"error": {"code": "missingtitle", "info": "no existe"}})
+            title, name = found
             html = (FIXTURES / name).read_text(encoding="utf-8")
-            return httpx.Response(200, text=json.dumps({"parse": {"text": html}}))
-        name = PAGES.get(unquote(path.removeprefix("/wiki/")))
-        if name is None:
+            return httpx.Response(200, text=json.dumps({"parse": {"title": title, "text": html}}))
+        found = PAGES.get(unquote(path.removeprefix("/wiki/")))
+        if found is None:
             return httpx.Response(404)
-        return httpx.Response(200, text=(FIXTURES / name).read_text(encoding="utf-8"))
+        title, name = found
+        html = (FIXTURES / name).read_text(encoding="utf-8")
+        return httpx.Response(200, text=f"<html><head><title>{title} - Wikipedia</title></head>"
+                                        f"<body>{html}</body></html>")
     return handler
 
 
@@ -268,18 +277,23 @@ def resumen(schedule):
     return [(e.date.isoformat(), None if bouts is None else len(bouts)) for e, bouts in schedule]
 
 
-def test_usa_los_articulos_si_robots_prohibe_la_api(tmp_path, session, capsys):
+def test_usa_los_articulos_si_robots_prohibe_la_api(tmp_path, session):
     requests = []
     reader = reader_for(tmp_path, (FIXTURES / "robots.txt").read_text(), requests)
     assert reader.route == "article"
 
     schedule = read_schedule(reader, HOY)
-    # Sin página, 4 peleas, 7 peleas, página que no existe (404)
+    # Redirige a "2026 in UFC", 4 peleas, 7 peleas, página que no existe (404)
     assert resumen(schedule) == [("2026-10-25", None), ("2026-11-08", 4),
                                  ("2026-11-15", 7), ("2026-11-22", None)]
-    assert "No se pudo leer la página UFC_Fight_Night_287" in capsys.readouterr().out
-    assert not any(url.path.startswith("/w/") for url in requests)
-    assert sum(url.path == "/robots.txt" for url in requests) == 1  # se lee una vez
+    assert [unquote(url.path) for url in requests] == [
+        "/robots.txt",  # se lee una vez
+        "/wiki/List_of_UFC_events",
+        "/wiki/UFC_Fight_Night_289",  # 404
+        "/wiki/UFC_330",  # es la del evento: no hace falta probar "UFC 330: Makhachev vs. ..."
+        "/wiki/UFC_Fight_Night:_Medić_vs._Rodriguez",
+        "/wiki/UFC_Fight_Night_287",  # la de otra cosa: no vale
+    ]
 
     report = sync_upcoming(session, schedule, HOY)
     session.commit()
@@ -296,6 +310,21 @@ def test_usa_la_api_si_robots_la_permite(tmp_path):
                                  ("2026-11-15", 7), ("2026-11-22", None)]
     assert not any(url.path.startswith("/wiki/") for url in requests)
     assert requests[1].params["action"] == "parse"
+
+
+def test_una_pagina_que_falla_no_para_el_resto(tmp_path, capsys):
+    wikipedia = fake_wikipedia(None, [])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "Medić" in unquote(str(request.url)):
+            return httpx.Response(403)
+        return wikipedia(request)
+
+    client = PoliteClient(cache_dir=tmp_path, transport=httpx.MockTransport(handler), sleep=lambda s: None)
+    schedule = read_schedule(WikipediaReader(client), HOY)
+    assert resumen(schedule) == [("2026-10-25", None), ("2026-11-08", None),
+                                 ("2026-11-15", 7), ("2026-11-22", None)]
+    assert "No se pudo leer la página de UFC Fight Night: Medić vs. Rodriguez: error 403" in capsys.readouterr().out
 
 
 def test_si_robots_lo_prohibe_todo_no_descarga_nada(tmp_path):
