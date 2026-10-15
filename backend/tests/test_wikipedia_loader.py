@@ -3,7 +3,7 @@
 Sin red: las descargas se simulan con las páginas de tests/fixtures/wikipedia.
 """
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -11,7 +11,7 @@ import httpx
 import pytest
 from sqlalchemy import func, select
 
-from app.db.models import Event, Fight, Fighter, FighterAlias, FightResult
+from app.db.models import Event, ExternalPrediction, Fight, Fighter, FighterAlias, FightResult, Source
 from app.ingestion.aliases import read_aliases
 from app.ingestion.http import PoliteClient
 from app.ingestion.kaggle_import import import_csv
@@ -265,6 +265,12 @@ def test_une_los_duplicados_que_dejo_una_version_anterior(session, conocidos):
     schedule = [(evento("UFC 333", date(2026, 10, 24)), [combate("Lee Jeong-yeong", "Brendan Allen")])]
     sync_upcoming(session, schedule, HOY)
     real = nuevo_peleador(session, "JeongYeong Lee", "Lightweight", "f007")
+    # Una fuente ya había elegido al duplicado
+    duplicado = session.scalar(select(Fighter).where(Fighter.name == "Lee Jeong-yeong"))
+    pick = ExternalPrediction(source=Source(name="Foro", kind="forum"), fight=session.scalar(select(Fight)),
+                              predicted_winner_id=duplicado.id, confidence=0.6,
+                              published_at=datetime(2026, 10, 20, tzinfo=timezone.utc))
+    session.add(pick)
     session.commit()
 
     report = sync_upcoming(session, schedule, HOY)
@@ -272,6 +278,7 @@ def test_une_los_duplicados_que_dejo_una_version_anterior(session, conocidos):
     assert report.merged == ["Lee Jeong-yeong = JeongYeong Lee"]
     assert real in (session.scalar(select(Fight)).fighter_a, session.scalar(select(Fight)).fighter_b)
     assert (report.fights_new, report.fights_cancelled) == (0, 0)
+    assert pick.predicted_winner_id == real.id  # la predicción pasa al del CSV
 
 
 def test_leer_el_archivo_de_alias(tmp_path):
@@ -481,3 +488,34 @@ def test_el_csv_no_une_por_nombre_si_hay_dos_iguales(session, tmp_path):
 
     assert report.adopted == {}
     assert session.scalar(select(func.count()).where(Fighter.name == "Joe Doe")) == 3
+
+
+def test_las_predicciones_siguen_al_peleador_del_csv(session, tmp_path):
+    # Wikipedia creó "Joe Doe" y una fuente lo eligió. El CSV trae dos "Joe Doe":
+    # no se adopta el registro por nombre, pero la pelea sí se reconoce. La
+    # predicción tiene que pasar al Joe Doe de esa pelea.
+    sync_upcoming(session, [(evento("UFC 330", date(2026, 11, 15)), [combate("Joe Doe", "Rival Futuro")])], HOY)
+    fight = session.scalar(select(Fight))
+    joe_wikipedia = session.scalar(select(Fighter).where(Fighter.name == "Joe Doe"))
+    pick = ExternalPrediction(source=Source(name="Foro", kind="forum"), fight=fight,
+                              predicted_winner_id=joe_wikipedia.id, confidence=0.6,
+                              published_at=datetime(2026, 11, 10, tzinfo=timezone.utc))
+    session.add(pick)
+    session.commit()
+
+    ufc330 = ("0e0e0e0e0e0e0e01", "UFC 330", "2026-11-15")
+    viejo = ("0d0d0d0d0d0d0d01", "UFC 100", "2009-07-11")
+    filas = [
+        pelea("9e9e9e9e9e9e9e91", ufc330, peleador(1, "Joe Doe", "e0e0e0e0e0e0e0e9"),
+              peleador(2, "Rival Futuro", "e2e2e2e2e2e2e2e9")),
+        pelea("9d9d9d9d9d9d9d92", viejo, peleador(1, "Joe Doe", "f0f0f0f0f0f0f0f9"),
+              peleador(2, "Otro Dos", "f1f1f1f1f1f1f1f9")),
+    ]
+    report = import_csv(session, escribir_csv(tmp_path / "doe.csv", filas), today=date(2026, 11, 16))
+    session.commit()
+
+    assert report.adopted["peleas"] == 1
+    joe_csv = session.scalar(select(Fighter).where(Fighter.ufcstats_id == "e0e0e0e0e0e0e0e9"))
+    assert joe_csv is not joe_wikipedia
+    assert joe_csv in (fight.fighter_a, fight.fighter_b)
+    assert pick.predicted_winner_id == joe_csv.id
