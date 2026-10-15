@@ -1,6 +1,13 @@
 # Peleadores que otra fuente escribe distinto que UFCStats (ver aliases.py).
-# Una fila por alias: el nombre en la otra fuente y el nombre en UFCStats,
-# que es el del CSV de Kaggle. Solo si se ha comprobado que es la misma persona.
+# Una fila por alias: el nombre en la otra fuente, el nombre en UFCStats
+# (el del CSV de Kaggle) y dónde se ha comprobado que es la misma persona.
 # Edítalo con un editor de texto: Excel en español guarda con ";" y no se leería.
-otro_nombre,nombre_ufcstats
-Abusupiyan Magomedov,Abus Magomedov
+otro_nombre,nombre_ufcstats,fuente
+Abusupiyan Magomedov,Abus Magomedov,https://blog.tapology.com/fightcenter/fighters/30204-abusupiyan-magomedov-abus
+Timothy Cuamba,Timmy Cuamba,https://cagesidepress.com/2024/06/16/ufc-vegas-93-lucas-almeida-timothy-cuamba
+Cameron Rowston,Cam Rowston,https://cagesidepress.com/2025/09/27/ufc-perth-battle-giraffe-cam-rowston-makes-splash-in-debut-stops-andre-petroski
+Wesley Schultz,Wes Schultz,https://cagesidepress.com/2026/02/28/ufc-mexico-city-damian-pinas-makes-short-work-of-wesley-schultz
+José Mauro Delano,Jose Delano,https://www.ufc.com/athlete/jose-delano
+Nina Nikolija Milošević,Nina Milosevic,https://cagesidepress.com/2026/08/01/ufc-belgrade-nina-nikolija-milosevic-uses-body-shots-to-end-hailey-cowans-night/
+Beatriz Mesquita,Bia Mesquita,https://cagesidepress.com/2025/10/11/ufc-rio-bia-mesquita-impresses-subs-irina-alekseeva-in-debut
+Matthieu Letho Duclos,Matthieu Duclos,https://cagesidepress.com/2026/09/05/ufc-paris-matthieu-duclos-punishes-aggressive-luis-felipe-dias-with-brutal-ko/

@@ -64,6 +64,14 @@ def test_nombres_parecidos():
     assert index.similar("Ko Seok-hyeon") == ["SeokHyun Ko"]  # apellido delante
     assert index.similar("Cristian Pérez") == []
 
+    # Pistas falsas de la primera prueba real: el nombre completo se parece,
+    # el apellido no
+    for nombre in ("Nick Agallar", "Tim McKenzie", "Lorenz Larkin"):
+        index.add(peleador(nombre, ufcstats_id=nombre))
+    assert index.similar("Nick Galanti") == []
+    assert index.similar("Mackenzie Stiller") == []
+    assert index.similar("Alik Lorenz") == []
+
 
 def test_quitar_del_indice():
     joe = peleador("Joe Doe")
