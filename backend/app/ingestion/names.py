@@ -18,3 +18,20 @@ def normalize_name(name: str) -> str:
     text = "".join(c for c in text if not unicodedata.combining(c))
     text = re.sub(r"[^a-z0-9 ]", " ", text.lower())  # fuera puntos, guiones, apóstrofes
     return " ".join(text.split())
+
+
+# Sufijos que unas fuentes ponen y otras no: "Khalil Rountree Jr." / "Khalil Rountree"
+SUFFIXES = {"jr", "sr", "ii", "iii", "iv"}
+
+
+def name_keys(name: str) -> set[str]:
+    """Variantes de un nombre para emparejar fuentes que lo escriben distinto.
+
+    'Khalil Rountree Jr.' -> {'khalil rountree', 'khalilrountree'}
+    Coinciden: con y sin "Jr.", 'Da Woon Jung' y 'Dawoon Jung',
+    'Zhang Weili' y 'Weili Zhang' (orden de las palabras).
+    """
+    words = [w for w in normalize_name(name).split() if w not in SUFFIXES]
+    if not words:
+        return set()
+    return {" ".join(words), "".join(words), " ".join(sorted(words))}

@@ -73,6 +73,25 @@ def test_reintenta_si_el_servidor_falla(tmp_path):
     assert client.get("http://x.com/a") == "ok"
 
 
+def test_robots_txt(tmp_path):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        if request.url.host == "prohibido.com":
+            return httpx.Response(403)
+        if request.url.host == "sin-robots.com":
+            return httpx.Response(404)
+        return httpx.Response(200, text="User-agent: *\nDisallow: /privado/\n")
+
+    client = make_client(tmp_path, handler)
+    assert client.allowed("http://x.com/publico/1")
+    assert not client.allowed("http://x.com/privado/1")
+    assert calls == ["/robots.txt"]  # se lee una sola vez por dominio
+    assert client.allowed("http://sin-robots.com/a")  # sin robots.txt: sin restricciones
+    assert not client.allowed("http://prohibido.com/a")  # 403: todo prohibido
+
+
 def test_pipeline_eventos_celebrados(session, tmp_path):
     ingestor = UFCStatsIngestor(make_client(tmp_path), session, today=date(2026, 10, 15))
     ingestor.sync_completed(limit=1)

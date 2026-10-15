@@ -18,22 +18,27 @@ NO se importa:
 
 Se puede ejecutar varias veces: actualiza lo que ya existe (mismo
 ufcstats_id) y no duplica nada.
+
+También une el CSV con lo que creó Wikipedia (eventos, peleas y debutantes
+sin ufcstats_id): si el CSV trae ese evento ya celebrado, completa esos
+registros en vez de crear otros. Ver "Unir con lo que creó Wikipedia".
 """
 import argparse
 import csv
 import math
 import sys
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import Event, Fight, Fighter, FightResult, FightStats, Odds
-from app.ingestion.names import normalize_name
+from app.ingestion.matching import FighterIndex, is_catchweight
+from app.ingestion.names import name_keys, normalize_name
 from app.ingestion.ufcstats.parsers import clean, id_from_url, parse_clock, parse_date, to_int
 
 ROUND_SECONDS = 5 * 60
@@ -124,6 +129,8 @@ class Report:
     fights_updated: int = 0
     with_stats: int = 0
     with_odds: int = 0
+    adopted: Counter = field(default_factory=Counter)  # "eventos" -> nº unidos con Wikipedia
+    orphans_cancelled: int = 0  # peleas anunciadas en Wikipedia que el CSV no trae
     outcomes: Counter = field(default_factory=Counter)  # "win" -> nº de peleas
     methods: Counter = field(default_factory=Counter)  # (texto del CSV, categoría) -> nº
     skipped: Counter = field(default_factory=Counter)  # motivo -> filas que no se importan
@@ -392,12 +399,6 @@ def read_csv(path: Path) -> tuple[list[CsvFight], Report]:
 # Guardado en la base de datos
 # ---------------------------------------------------------------------------
 
-def is_catchweight(weight_class: str) -> bool:
-    """Peso pactado o abierto: no es la categoría habitual del peleador."""
-    lower = weight_class.lower()
-    return "catch" in lower or "open" in lower
-
-
 def save_fighter(fighter: Fighter, p: CsvFighter) -> None:
     fighter.name = p.name
     fighter.wins, fighter.losses = p.wins, p.losses
@@ -444,14 +445,91 @@ def save_stats(fight: Fight, cf: CsvFight, fighters: dict[str, Fighter]) -> bool
     return saved
 
 
+# ---------------------------------------------------------------------------
+# Unir con lo que creó Wikipedia
+# ---------------------------------------------------------------------------
+# Wikipedia crea los próximos eventos, sus peleas y los debutantes sin
+# ufcstats_id ("huérfanos"). Cuando el CSV trae el evento ya celebrado, estas
+# funciones encuentran esos registros para completarlos en vez de crear otros.
+# Así las predicciones guardadas antes del evento quedan unidas a su resultado.
+
+def take_orphan_event(orphans: list[Event], day: date) -> Event | None:
+    """El evento sin ufcstats_id de ese día (o de un día antes o después)."""
+    for days in (0, -1, 1):
+        for event in orphans:
+            if event.date == day + timedelta(days=days):
+                orphans.remove(event)
+                return event
+    return None
+
+
+def take_orphan_fighter(orphans: FighterIndex, p: CsvFighter, weight_class: str | None,
+                        csv_names: dict[str, set[str]]) -> Fighter | None:
+    """El peleador sin ufcstats_id que se llama como p, si no hay dudas."""
+    if len(csv_names[normalize_name(p.name)]) > 1:
+        return None  # en el CSV hay dos peleadores con ese nombre: no se adivina
+    found = orphans.find(p.name, weight_class)
+    if len(found) != 1:
+        return None
+    orphans.remove(found[0])
+    return found[0]
+
+
+def take_orphan_fight(orphans: list[Fight], cf: CsvFight, f1: Fighter,
+                      f2: Fighter) -> tuple[Fight, bool] | None:
+    """La pelea sin ufcstats_id del evento entre estos dos peleadores.
+
+    Devuelve (pelea, invertida). invertida = True si f_1 del CSV está en la esquina B.
+    """
+    def same(db: Fighter, fighter: Fighter, p: CsvFighter) -> bool:
+        return db is fighter or bool(name_keys(db.name) & name_keys(p.name))
+
+    p1, p2 = cf.fighters
+    for fight in orphans:
+        a, b = fight.fighter_a, fight.fighter_b
+        if same(a, f1, p1) and same(b, f2, p2):
+            inverted = False
+        elif same(a, f2, p2) and same(b, f1, p1):
+            inverted = True
+        else:
+            continue
+        orphans.remove(fight)
+        return fight, inverted
+    return None
+
+
+def by_id(f1: Fighter, f2: Fighter) -> tuple[Fighter, Fighter]:
+    """Esquinas A y B ordenadas por ufcstats_id.
+
+    El CSV pone primero al GANADOR: si copiáramos su orden, "gana A" sería
+    casi siempre verdad y el modelo aprendería una trampa.
+    """
+    return (f1, f2) if f1.ufcstats_id < f2.ufcstats_id else (f2, f1)
+
+
 def save_fights(session: Session, fights: list[CsvFight], report: Report, today: date) -> None:
     """Guarda las peleas leídas. No hace commit: eso lo decide quien llama."""
     # 1. Lo que ya hay en la base de datos, en diccionarios por ufcstats_id.
     #    Así no hace falta una consulta por fila (son casi 9000).
-    events = {e.ufcstats_id: e for e in session.scalars(select(Event))}
-    fighters = {f.ufcstats_id: f for f in session.scalars(select(Fighter))}
+    #    Aparte, lo creado por Wikipedia (sin ufcstats_id).
+    all_events = session.scalars(select(Event)).all()
+    events = {e.ufcstats_id: e for e in all_events if e.ufcstats_id}
+    orphan_events = [e for e in all_events if e.ufcstats_id is None]
+    all_fighters = session.scalars(select(Fighter)).all()
+    fighters = {f.ufcstats_id: f for f in all_fighters if f.ufcstats_id}
+    orphan_fighters = FighterIndex(f for f in all_fighters if f.ufcstats_id is None)
     query = select(Fight).options(selectinload(Fight.result), selectinload(Fight.stats))
-    existing = {f.ufcstats_id: f for f in session.scalars(query)}
+    all_fights = session.scalars(query).all()
+    existing = {f.ufcstats_id: f for f in all_fights if f.ufcstats_id}
+    orphan_fights = defaultdict(list)  # id del evento -> sus peleas sin ufcstats_id
+    for fight in all_fights:
+        if fight.ufcstats_id is None:
+            orphan_fights[fight.event_id].append(fight)
+    # Nombre -> ids del CSV que lo llevan. Si son dos, no se une por nombre.
+    csv_names = defaultdict(set)
+    for cf in fights:
+        for p in cf.fighters:
+            csv_names[normalize_name(p.name)].add(p.ufcstats_id)
 
     # De la más antigua a la más reciente: así cada peleador acaba con los
     # datos de su última pelea (nombre, categoría de peso...).
@@ -461,11 +539,16 @@ def save_fights(session: Session, fights: list[CsvFight], report: Report, today:
     for cf in fights:
         event = events.get(cf.event_id)
         if event is None:
-            event = Event(ufcstats_id=cf.event_id, name=cf.event_name, date=cf.event_date,
-                          status="upcoming")
-            session.add(event)
+            event = take_orphan_event(orphan_events, cf.event_date)
+            if event is None:
+                event = Event(ufcstats_id=cf.event_id, name=cf.event_name, date=cf.event_date,
+                              status="upcoming")
+                session.add(event)
+                report.events_new += 1
+            else:
+                event.ufcstats_id = cf.event_id
+                report.adopted["eventos"] += 1
             events[cf.event_id] = event
-            report.events_new += 1
         event.name, event.date, event.location = cf.event_name, cf.event_date, cf.location
         if cf.method or cf.event_date < today:
             event.status = "completed"
@@ -473,34 +556,44 @@ def save_fights(session: Session, fights: list[CsvFight], report: Report, today:
         for p in cf.fighters:
             fighter = fighters.get(p.ufcstats_id)
             if fighter is None:
-                fighter = Fighter(ufcstats_id=p.ufcstats_id, name=p.name)
-                session.add(fighter)
+                fighter = take_orphan_fighter(orphan_fighters, p, cf.weight_class, csv_names)
+                if fighter is None:
+                    fighter = Fighter(ufcstats_id=p.ufcstats_id, name=p.name)
+                    session.add(fighter)
+                    report.fighters_new += 1
+                else:
+                    fighter.ufcstats_id = p.ufcstats_id
+                    report.adopted["peleadores"] += 1
                 fighters[p.ufcstats_id] = fighter
-                report.fighters_new += 1
             save_fighter(fighter, p)
             if cf.weight_class and not is_catchweight(cf.weight_class):
                 fighter.weight_class = cf.weight_class
     session.flush()  # ahora todos los peleadores tienen id
 
-    # 3. Peleas, resultados y estadísticas
+    # 3. Peleas, resultados y estadísticas.
+    #    Una pelea que ya existe conserva sus esquinas A y B: puede tener
+    #    predicciones guardadas, que son P(gana A).
     for cf in fights:
-        # Esquinas A y B ordenadas por id. El CSV pone primero al GANADOR:
-        # si copiáramos su orden, "gana A" sería casi siempre verdad y el
-        # modelo aprendería una trampa.
-        id_a, id_b = sorted(p.ufcstats_id for p in cf.fighters)
+        f1, f2 = (fighters[p.ufcstats_id] for p in cf.fighters)
+        event = events[cf.event_id]
         fight = existing.get(cf.ufcstats_id)
-        if fight is None:
-            fight = Fight(
-                ufcstats_id=cf.ufcstats_id, event=events[cf.event_id],
-                fighter_a=fighters[id_a], fighter_b=fighters[id_b],
-            )
-            session.add(fight)
-            existing[cf.ufcstats_id] = fight
-            report.fights_new += 1
-        else:
+        orphan = take_orphan_fight(orphan_fights[event.id], cf, f1, f2) if fight is None else None
+        if fight is not None:
             report.fights_updated += 1
-        fight.event = events[cf.event_id]
-        fight.fighter_a, fight.fighter_b = fighters[id_a], fighters[id_b]
+            if {fight.fighter_a, fight.fighter_b} != {f1, f2}:
+                fight.fighter_a, fight.fighter_b = by_id(f1, f2)  # el CSV cambió un peleador
+        elif orphan is not None:
+            fight, inverted = orphan
+            fight.ufcstats_id = cf.ufcstats_id
+            fight.fighter_a, fight.fighter_b = (f2, f1) if inverted else (f1, f2)
+            report.adopted["peleas"] += 1
+        else:
+            fight = Fight(ufcstats_id=cf.ufcstats_id, event=event)
+            fight.fighter_a, fight.fighter_b = by_id(f1, f2)
+            session.add(fight)
+            report.fights_new += 1
+        existing[cf.ufcstats_id] = fight
+        fight.event = event
         fight.weight_class = cf.weight_class
         fight.is_title_fight = cf.is_title_fight
         fight.scheduled_rounds = cf.scheduled_rounds
@@ -514,6 +607,14 @@ def save_fights(session: Session, fights: list[CsvFight], report: Report, today:
         save_result(fight, cf, fighters)
         if save_stats(fight, cf, fighters):
             report.with_stats += 1
+
+    # Peleas que Wikipedia anunció en un evento ya celebrado y que el CSV no
+    # trae: no llegaron a celebrarse (o cambió un rival a última hora)
+    for event in {events[cf.event_id] for cf in fights}:
+        for fight in orphan_fights.get(event.id, []):
+            if event.date < today and fight.status == "scheduled":
+                fight.status = "cancelled"
+                report.orphans_cancelled += 1
     session.flush()  # ahora todas las peleas tienen id
 
     # 4. Cuotas (una fila por pelea, con la casa "kaggle")
@@ -553,6 +654,10 @@ def print_report(r: Report) -> None:
           f" (ya estaban: {r.fights_updated})")
     print("Resultados: " + (", ".join(f"{k} {v}" for k, v in r.outcomes.most_common()) or "ninguno"))
     print(f"Peleas con estadísticas: {r.with_stats}. Con cuotas: {r.with_odds}.")
+    if r.adopted or r.orphans_cancelled:
+        print(f"Unidos con lo que creó Wikipedia: {r.adopted['eventos']} eventos,"
+              f" {r.adopted['peleadores']} peleadores, {r.adopted['peleas']} peleas."
+              f" Anunciadas que no se celebraron: {r.orphans_cancelled}.")
     print("Columna 'result' del CSV -> categoría:")
     for (raw, method), n in r.methods.most_common():
         print(f"  {n:6}  {raw} -> {method}")

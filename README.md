@@ -43,9 +43,10 @@ python -m pytest                                 # tests
 python -m app.ingestion.odds_api                 # cuotas (necesita ODDS_API_KEY en .env)
 python -m app.ingestion.inspect_csv data/kaggle  # ver columnas de unos CSV
 python -m app.ingestion.kaggle_import data/kaggle/UFC_full_data_silver_v2.csv  # histórico
+python -m app.ingestion.wikipedia upcoming       # próximos eventos y carteleras
 ```
 
-> UFCStats bloquea programas desde octubre de 2026. El histórico sale de un CSV de Kaggle que descargas a mano en `backend/data/kaggle/`. Ver [docs/03-ingesta.md](docs/03-ingesta.md).
+> UFCStats bloquea programas desde octubre de 2026. El histórico sale de un CSV de Kaggle que descargas a mano en `backend/data/kaggle/` y las próximas carteleras, de Wikipedia. Ver [docs/03-ingesta.md](docs/03-ingesta.md).
 
 ## Problemas frecuentes en Windows
 

@@ -8,6 +8,7 @@ Desde un programa, `ufcstats.com` devuelve una página "Checking your browser…
 
 Alternativas:
 - Histórico: un CSV de Kaggle con los datos de UFCStats, descargado a mano (abajo).
+- Próximos eventos y carteleras: Wikipedia (abajo).
 - Cuotas: The Odds API (abajo).
 
 ## Histórico desde Kaggle
@@ -45,6 +46,65 @@ Decisiones:
 
 Se puede repetir: actualiza por `ufcstats_id` y no duplica. Al terminar imprime un resumen: resultados, cómo se tradujo cada valor de `result`, filas no importadas y avisos con ejemplos.
 
+También completa lo que creó Wikipedia en vez de duplicarlo (ver "Cuando el CSV trae el evento celebrado").
+
+## Próximas carteleras desde Wikipedia
+
+Código: [`backend/app/ingestion/wikipedia/`](../backend/app/ingestion/wikipedia/).
+
+```bash
+python -m app.ingestion.wikipedia upcoming   # próximos eventos y peleas -> base de datos
+python -m app.ingestion.wikipedia sample     # guarda páginas reales para los tests
+```
+
+| Página | Qué se saca |
+|---|---|
+| `List_of_UFC_events`, tabla "Scheduled events" | nombre, fecha, recinto, ciudad y página de cada evento |
+| Página de cada evento | peleas: tabla con columna "Weight class" y listas "Lightweight bout: A vs. B" |
+
+Un evento sin página todavía se guarda sin peleas.
+
+### Permisos
+
+- **robots.txt.** Antes de descargar se lee (`PoliteClient.allowed`). Si permite la API oficial (`/w/api.php`), se usa la API. Si solo permite las páginas de los artículos (`/wiki/...`), se leen esas. Si no permite ninguna, no se descarga nada. `sample` imprime qué permite.
+- **Normas de la API de Wikimedia.** Piden un User-Agent con contacto y no fijan un límite de peticiones, pero sí que se hagan de una en una. Se envía `ufc-predictor/0.1 (https://github.com/XxruahuxX/ufc-predictor; proyecto de estudiante) httpx/…`, se espera 2 s entre peticiones y hay caché de 6 horas.
+- **Licencia.** El texto de Wikipedia es CC BY-SA. Se guardan datos (fechas, nombres, quién pelea con quién), no texto. La web citará Wikipedia como fuente.
+
+### Cómo se une con lo que ya hay
+
+Wikipedia no tiene los ids de UFCStats: se compara por nombre y fecha.
+
+| Qué | Cómo se reconoce |
+|---|---|
+| Evento | Mismo nombre, aunque cambie de fecha. Si no, misma fecha (±1 día por la zona horaria). |
+| Peleador | Nombre sin tildes ni mayúsculas, o un alias. Si no, variantes: sin "Jr.", sin espacios ("Da Woon" = "Dawoon"), palabras en otro orden ("Zhang Weili" = "Weili Zhang"). |
+| Pelea | Mismo evento y mismos dos peleadores, en cualquier orden. |
+
+Decisiones:
+- **Lo que no existe se crea sin `ufcstats_id`**: eventos, peleas y debutantes.
+- **Esquinas A y B por orden alfabético.** Tras la pelea, Wikipedia pone primero al ganador: ese orden no puede llegar a los datos.
+- **Asaltos.** 5 si es por el título o es la estelar (primera fila de la tabla); 3 en el resto.
+- **Dos peleadores con el mismo nombre.** Decide la categoría de la pelea. Si sigue la duda, la pelea no se guarda y sale en el resumen.
+- **Pelea que desaparece de la cartelera:** `cancelled`. Si vuelve, `scheduled` otra vez.
+- **Evento creado por Wikipedia que desaparece de la lista** (cancelado, o con otra fecha y otro nombre): se borra con sus peleas. Si la lista llega vacía, no se borra nada.
+- **Nunca se tocan** eventos pasados, peleas con resultado ni el nombre de un evento que viene de UFCStats.
+
+Al terminar imprime un resumen. "Peleadores nuevos" lista los debutantes y los nombres que no se han reconocido: si sale alguien conocido, su nombre se escribe distinto en las dos fuentes.
+
+### Cuando el CSV trae el evento celebrado
+
+`kaggle_import` busca primero lo que creó Wikipedia:
+- **Evento:** misma fecha (±1 día).
+- **Debutante:** mismo nombre, solo si en el CSV no hay dos peleadores con ese nombre.
+- **Pelea:** mismo evento y mismos dos peleadores. Conserva sus esquinas A y B: puede tener predicciones guardadas, que son P(gana A).
+- **Peleas anunciadas que el CSV no trae**, en un evento ya celebrado: `cancelled`.
+
+Así las predicciones hechas antes del evento quedan unidas a su resultado.
+
+Limitaciones:
+- Un debutante que se llama igual que un peleador antiguo se toma por él.
+- Un nombre escrito muy distinto ("Saint Preux" / "St. Preux") crea un peleador nuevo. Se arreglará con alias.
+
 ## The Odds API
 
 Código: [`backend/app/ingestion/odds_api.py`](../backend/app/ingestion/odds_api.py). API oficial con clave gratuita: 500 créditos al mes. Una consulta de cuotas de MMA con 1 mercado (`h2h`) y 1 región (`eu`) cuesta 1 crédito. Caché de 6 horas.
@@ -65,18 +125,24 @@ python -m app.ingestion.odds_api
 `ufcstats.com/robots.txt` no existe (404, comprobado el 15/10/2026), así que el sitio no declara restricciones. Aun así:
 - 1 petición cada 2 segundos como mínimo (`--delay` para cambiarlo).
 - Caché en disco (`backend/cache/`). Una página que no cambia no se pide dos veces.
-- User-Agent que identifica el proyecto.
+- User-Agent que identifica el proyecto, con la URL del repositorio como contacto.
 - Las páginas descargadas no se suben al repositorio.
+
+Wikipedia: ver su sección. Ahí robots.txt se comprueba en cada ejecución.
 
 ## Piezas
 
 | Archivo | Qué hace |
 |---|---|
-| `http.py` | Cliente HTTP común: rate limit por dominio, caché y reintentos (2 s, 4 s, 8 s). Todos los conectores futuros (Reddit, cuotas...) lo usarán. |
+| `http.py` | Cliente HTTP común: rate limit por dominio, caché, reintentos (2 s, 4 s, 8 s) y comprobación de robots.txt. Todos los conectores lo usan. |
+| `names.py`, `matching.py` | Comparar nombres de peleadores entre fuentes. |
 | `ufcstats/parsers.py` | HTML → datos. No toca red ni base de datos. |
 | `ufcstats/loader.py` | Datos → base de datos. Upsert por `ufcstats_id`: repetir no duplica. |
 | `ufcstats/pipeline.py` | Une las dos: qué páginas pedir, en qué orden y con qué caché. |
 | `ufcstats/sample.py` | Descarga 5 páginas reales para probar los parsers. |
+| `wikipedia/parsers.py` | HTML de Wikipedia → eventos y peleas. |
+| `wikipedia/loader.py` | Eventos y peleas → base de datos, emparejando por nombre y fecha. |
+| `wikipedia/__main__.py` | Comandos `upcoming` y `sample`; elige API o artículo según robots.txt. |
 
 ## Flujo
 
@@ -115,6 +181,10 @@ Un evento tiene unas 13 peleas y 26 peleadores: unas 40 peticiones, menos de 2 m
 - `test_ingestion.py`: caché, rate limit, reintentos y pipeline completo contra un UFCStats simulado.
 - `test_ufcstats_real.py`: páginas reales. Se saltan hasta que ejecutes `python -m app.ingestion.ufcstats.sample`.
 - `test_kaggle_import.py`: CSV con las columnas del real; dos filas copian datos reales (Allen vs. Duncan). Prueba resultados, esquinas, estadísticas, cuotas y que importar dos veces no duplica.
+- `test_matching.py`: nombres escritos de formas distintas y nombres repetidos.
+- `test_wikipedia_parsers.py`: páginas de ejemplo escritas a mano con la estructura de Wikipedia (títulos nuevos y antiguos, tabla y listas).
+- `test_wikipedia_loader.py`: carteleras que cambian, eventos aplazados o cancelados, descarga simulada por API o por artículo según robots.txt, y unión con el CSV cuando el evento ya se celebró.
+- `test_wikipedia_real.py`: páginas reales. Se saltan hasta que ejecutes `python -m app.ingestion.wikipedia sample`.
 
 Si `sample` no entiende una página, imprime un diagnóstico (estado HTTP, título, cuántos enlaces hay y un trozo del HTML) para poder ajustar el parser sin tener que enviar el archivo.
 
