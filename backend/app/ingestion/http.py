@@ -30,6 +30,7 @@ class PoliteClient:
         self.max_retries = max_retries
         self.sleep = sleep
         self._last_request: dict[str, float] = {}  # dominio -> instante de la última petición
+        self.last_response: httpx.Response | None = None  # para diagnosticar problemas
         self.http = httpx.Client(
             headers={"User-Agent": USER_AGENT},
             timeout=20,
@@ -68,6 +69,7 @@ class PoliteClient:
             self._wait_turn(domain)
             try:
                 response = self.http.get(url)
+                self.last_response = response
                 if response.status_code < 500:
                     response.raise_for_status()  # 4xx: error nuestro, no se reintenta
                     path.write_text(response.text, encoding="utf-8")

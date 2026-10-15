@@ -82,3 +82,16 @@ def test_conversiones():
     assert parsers.normalize_method("M-DEC") == ("DEC", "Majority")
     assert parsers.normalize_method("SUB") == ("SUB", None)
     assert parsers.normalize_method("DQ") == ("DQ", None)
+
+
+def test_lista_sin_clases_css():
+    """Si la web cambia el diseño pero no las URLs, el parser sigue funcionando."""
+    html = (
+        '<table><tr><td><a href="https://www.ufcstats.com/event-details/abc123/">UFC X</a>'
+        ' <b>March 01, 2025</b></td><td>Madrid, Spain</td></tr></table>'
+    )
+    [event] = parsers.parse_event_list(html)
+    assert event.ufcstats_id == "abc123"
+    assert event.name == "UFC X"
+    assert event.date == date(2025, 3, 1)
+    assert event.location == "Madrid, Spain"
