@@ -8,7 +8,7 @@ Aplicación web que predice peleas de la UFC combinando un modelo estadístico p
 
 - [Fase 1: arquitectura](docs/01-arquitectura.md)
 - [Fase 2: esquema de base de datos](docs/02-esquema.md)
-- [Fase 3: ingesta de UFCStats](docs/03-ingesta.md)
+- [Fase 3: ingesta de datos](docs/03-ingesta.md)
 
 ## Puesta en marcha
 
@@ -42,9 +42,10 @@ python -m app.db.init_db                         # crea las tablas
 python -m pytest                                 # tests
 python -m app.ingestion.odds_api                 # cuotas (necesita ODDS_API_KEY en .env)
 python -m app.ingestion.inspect_csv data/kaggle  # ver columnas de unos CSV
+python -m app.ingestion.kaggle_import data/kaggle/UFC_full_data_silver_v2.csv  # histórico
 ```
 
-> UFCStats bloquea programas desde octubre de 2026. Ver [docs/03-ingesta.md](docs/03-ingesta.md).
+> UFCStats bloquea programas desde octubre de 2026. El histórico sale de un CSV de Kaggle que descargas a mano en `backend/data/kaggle/`. Ver [docs/03-ingesta.md](docs/03-ingesta.md).
 
 ## Problemas frecuentes en Windows
 

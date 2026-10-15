@@ -1,4 +1,4 @@
-# Fase 3 · Ingesta de UFCStats
+# Fase 3 · Ingesta de datos
 
 Código: [`backend/app/ingestion/`](../backend/app/ingestion/).
 
@@ -6,9 +6,44 @@ Código: [`backend/app/ingestion/`](../backend/app/ingestion/).
 
 Desde un programa, `ufcstats.com` devuelve una página "Checking your browser…" que exige JavaScript y una prueba de trabajo. Es una barrera anti-bots puesta a propósito. **No se intenta saltar.** El código de UFCStats se conserva porque sus parsers sirven para páginas guardadas a mano desde el navegador.
 
-Alternativas en estudio:
-- Histórico: datasets de Kaggle derivados de UFCStats (descarga manual). `python -m app.ingestion.inspect_csv data/kaggle` muestra columnas y filas de ejemplo para escribir el importador.
-- Próximas peleas y cuotas: The Odds API (abajo).
+Alternativas:
+- Histórico: un CSV de Kaggle con los datos de UFCStats, descargado a mano (abajo).
+- Cuotas: The Odds API (abajo).
+
+## Histórico desde Kaggle
+
+Código: [`backend/app/ingestion/kaggle_import.py`](../backend/app/ingestion/kaggle_import.py).
+
+Archivo: `UFC_full_data_silver_v2.csv` (8937 peleas, 361 columnas). Se guarda en `backend/data/kaggle/`, que no se sube al repositorio. Pendiente: anotar el enlace del dataset y su licencia.
+
+```bash
+python -m app.ingestion.inspect_csv data/kaggle   # ver columnas y filas de ejemplo
+python -m app.ingestion.kaggle_import data/kaggle/UFC_full_data_silver_v2.csv
+```
+
+| Columnas del CSV | Tabla |
+|---|---|
+| `event_*` | `events` (lugar = ciudad, estado, país) |
+| `f_1_*`, `f_2_*` (nombre, URL, `fighter_*`) | `fighters` |
+| `fight_url`, `num_rounds`, `title_fight`, `weight_class` | `fights` |
+| `winner`, `result`, `result_details`, `finish_round`, `finish_time` | `fight_results` |
+| `f_1_knockdowns` … `f_1_ctrl_time_sec` (y `f_2_`) | `fight_stats` |
+| `f_1_odds`, `f_2_odds` | `odds` (casa `kaggle`) |
+
+No se importan:
+- **Medias de carrera** (`SlpM`, `Str_Acc`, `TD_Avg`...). Son una foto de hoy. Para predecir una pelea de 2015 el modelo vería datos posteriores. Las medias se calcularán con `fight_stats`, solo con peleas anteriores a cada fecha.
+- Estadísticas por asalto, rankings y cuotas de KO o sumisión: no están en el esquema.
+
+Decisiones:
+- **Esquinas A y B por id.** El CSV pone primero al ganador, igual que UFCStats.
+- **Ganador.** Se compara el nombre de `winner` con los dos peleadores, sin tildes ni mayúsculas. Si no coincide con ninguno, la pelea se guarda sin resultado y sale en los avisos.
+- **Sin ganador:** decisión = empate (`draw`); `Overturned`, `Could Not Continue`, `Other` = sin resultado (`no_contest`).
+- **Asaltos.** El esquema admite 3 o 5. Los formatos de los años 90 (1 asalto, sin límite) se guardan como 3.
+- **Orden en la cartelera:** el del CSV, que pone la pelea estelar primero.
+- **Cuotas.** Formato decimal o americano, según el número: una americana nunca está entre -100 y +100. Como el CSV no dice cuándo se tomaron, se guardan con fecha del evento a las 00:00 UTC.
+- **Ficha del peleador:** récord, altura, alcance y fecha de nacimiento actuales; categoría de su pelea más reciente que no sea de peso pactado.
+
+Se puede repetir: actualiza por `ufcstats_id` y no duplica. Al terminar imprime un resumen: resultados, cómo se tradujo cada valor de `result`, filas no importadas y avisos con ejemplos.
 
 ## The Odds API
 
@@ -79,6 +114,7 @@ Un evento tiene unas 13 peleas y 26 peleadores: unas 40 peticiones, menos de 2 m
 - `test_ufcstats_parsers.py`: páginas de ejemplo escritas a mano con la estructura de UFCStats.
 - `test_ingestion.py`: caché, rate limit, reintentos y pipeline completo contra un UFCStats simulado.
 - `test_ufcstats_real.py`: páginas reales. Se saltan hasta que ejecutes `python -m app.ingestion.ufcstats.sample`.
+- `test_kaggle_import.py`: CSV con las columnas del real; dos filas copian datos reales (Allen vs. Duncan). Prueba resultados, esquinas, estadísticas, cuotas y que importar dos veces no duplica.
 
 Si `sample` no entiende una página, imprime un diagnóstico (estado HTTP, título, cuántos enlaces hay y un trozo del HTML) para poder ajustar el parser sin tener que enviar el archivo.
 
