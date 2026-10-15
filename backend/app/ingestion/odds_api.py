@@ -8,6 +8,7 @@ Plan gratuito: 500 créditos al mes. Cada consulta de cuotas cuesta
 Uso desde backend/:  python -m app.ingestion.odds_api
 """
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -15,7 +16,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Event, Fight, FighterAlias, Odds
+from app.db.models import Event, Fight, Odds
 from app.ingestion.http import PoliteClient
 from app.ingestion.names import normalize_name
 
@@ -152,13 +153,14 @@ def fetch_odds(client: PoliteClient, api_key: str, regions: str = "eu") -> str:
 
 def main() -> None:
     from app.config import settings
-    from app.db.models import Base
-    from app.db.session import SessionLocal, engine
+    from app.db.init_db import create_tables
+    from app.db.session import SessionLocal
 
     if not settings.odds_api_key:
         print("Falta ODDS_API_KEY en el archivo .env. Consíguela gratis en https://the-odds-api.com")
         return
-    Base.metadata.create_all(engine)
+    if not create_tables():
+        sys.exit(1)
     client = PoliteClient(cache_dir="cache/odds_api", min_interval=1.0)
     try:
         events = parse_odds(fetch_odds(client, settings.odds_api_key, settings.odds_api_regions))
