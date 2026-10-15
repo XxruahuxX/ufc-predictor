@@ -16,5 +16,11 @@ class Settings(BaseSettings):
     # Región de las casas de apuestas: "eu" (Europa), "uk", "us", "au"
     odds_api_regions: str = "eu"
 
+    # Puntuación de fuentes (fase 4, ver app/scoring/sources.py)
+    # Predicciones evaluadas que necesita una fuente para tener peso
+    source_min_predictions: int = 20
+    # Una predicción de hace este número de días cuenta la mitad que una de hoy
+    source_half_life_days: int = 365
+
 
 settings = Settings()

@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.models import Event, Fight, Fighter, FightResult, FightStats, Odds
 from app.ingestion.matching import FighterIndex, is_catchweight
 from app.ingestion.names import name_keys, normalize_name
+from app.ingestion.predictions import move_picks
 from app.ingestion.ufcstats.parsers import clean, id_from_url, parse_clock, parse_date, to_int
 
 ROUND_SECONDS = 5 * 60
@@ -585,7 +586,11 @@ def save_fights(session: Session, fights: list[CsvFight], report: Report, today:
         elif orphan is not None:
             fight, inverted = orphan
             fight.ufcstats_id = cf.ufcstats_id
+            old_a, old_b = fight.fighter_a, fight.fighter_b
             fight.fighter_a, fight.fighter_b = (f2, f1) if inverted else (f1, f2)
+            # Las predicciones que elegían al peleador de Wikipedia eligen ahora al del CSV
+            move_picks(session, fight.id, {old_a.id: fight.fighter_a.id,
+                                           old_b.id: fight.fighter_b.id})
             report.adopted["peleas"] += 1
         else:
             fight = Fight(ufcstats_id=cf.ufcstats_id, event=event)

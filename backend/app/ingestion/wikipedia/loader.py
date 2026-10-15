@@ -23,6 +23,7 @@ from app.db.models import Event, Fight, Fighter
 from app.ingestion.aliases import add_aliases
 from app.ingestion.matching import FighterIndex, is_catchweight
 from app.ingestion.names import normalize_name
+from app.ingestion.predictions import move_picks
 from app.ingestion.wikipedia.parsers import Bout, ScheduledEvent
 
 
@@ -87,7 +88,8 @@ def merge_orphans(session: Session, index: FighterIndex, report: SyncReport) -> 
 
     Pasa al añadir un alias o al mejorar la comparación de nombres: el
     debutante "Abusupiyan Magomedov" era "Abus Magomedov". Sus peleas pasan
-    al peleador del CSV y el duplicado se borra.
+    al peleador del CSV, igual que las predicciones que lo elegían, y el
+    duplicado se borra.
     """
     for orphan in list(session.scalars(select(Fighter).where(Fighter.ufcstats_id.is_(None)))):
         index.remove(orphan)  # si no, se encontraría a sí mismo
@@ -104,6 +106,7 @@ def merge_orphans(session: Session, index: FighterIndex, report: SyncReport) -> 
                 fight.fighter_a = real
             else:
                 fight.fighter_b = real
+            move_picks(session, fight.id, {orphan.id: real.id})
         session.flush()  # primero las peleas, luego se borra el duplicado
         session.delete(orphan)
         report.merged.append(f"{orphan.name} = {real.name}")
