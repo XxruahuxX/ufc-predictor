@@ -1,18 +1,25 @@
 """Cliente HTTP "educado" que usan todos los conectores.
 
-Hace tres cosas para no abusar de las webs:
+Hace cuatro cosas para no abusar de las webs:
 1. Rate limit: espera un mínimo de segundos entre peticiones al mismo dominio.
 2. Caché en disco: si ya descargamos una página y no ha caducado, no se vuelve a pedir.
 3. Reintentos: si falla por error de red o 5xx, reintenta esperando cada vez más.
+4. robots.txt: allowed(url) dice si el sitio permite que un programa la descargue.
 """
 import hashlib
 import time
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.robotparser import RobotFileParser
 
 import httpx
 
-USER_AGENT = "ufc-predictor/0.1 (proyecto de estudiante; uso personal)"
+DAY = 24 * 3600
+
+# Quién somos y cómo contactarnos, como pide por ejemplo la política de
+# Wikimedia: "nombre/versión (contacto) librería/versión"
+CONTACT = "https://github.com/XxruahuxX/ufc-predictor"
+USER_AGENT = f"ufc-predictor/0.1 ({CONTACT}; proyecto de estudiante) httpx/{httpx.__version__}"
 
 
 class PoliteClient:
@@ -30,6 +37,7 @@ class PoliteClient:
         self.max_retries = max_retries
         self.sleep = sleep
         self._last_request: dict[str, float] = {}  # dominio -> instante de la última petición
+        self._robots: dict[str, RobotFileParser] = {}  # dominio -> reglas de su robots.txt
         self.last_response: httpx.Response | None = None  # para diagnosticar problemas
         self.http = httpx.Client(
             headers={"User-Agent": USER_AGENT},
@@ -80,3 +88,24 @@ class PoliteClient:
             # Error 5xx o de red: esperamos 2, 4, 8... segundos y reintentamos
             self.sleep(2**attempt)
         raise httpx.HTTPError(f"No se pudo descargar {url} tras {self.max_retries} intentos")
+
+    def allowed(self, url: str) -> bool:
+        """True si el robots.txt del sitio permite que este programa descargue la URL.
+
+        robots.txt se lee una vez por dominio (caché de 1 día). Si no existe
+        (404), no hay restricciones. Si responde 401 o 403, todo prohibido.
+        """
+        parts = urlparse(url)
+        if parts.netloc not in self._robots:
+            rules = RobotFileParser()
+            try:
+                text = self.get(f"{parts.scheme}://{parts.netloc}/robots.txt", max_age=DAY)
+            except httpx.HTTPStatusError as err:
+                if err.response.status_code in (401, 403):
+                    rules.disallow_all = True
+                else:
+                    rules.allow_all = True
+            else:
+                rules.parse(text.splitlines())
+            self._robots[parts.netloc] = rules
+        return self._robots[parts.netloc].can_fetch(USER_AGENT, url)

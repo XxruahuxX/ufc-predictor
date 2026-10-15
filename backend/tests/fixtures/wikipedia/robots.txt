@@ -1,0 +1,10 @@
+# Ejemplo para los tests: no es una copia del robots.txt real de Wikipedia.
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: *
+Allow: /w/api.php?action=mobileview&
+Allow: /w/load.php?
+Disallow: /w/
+Disallow: /api/
+Disallow: /wiki/Special:
