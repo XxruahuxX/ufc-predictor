@@ -1,0 +1,19 @@
+# Fase 2: solo la base de datos. En fases siguientes se añaden api, worker y web.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ufc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ufc}
+      POSTGRES_DB: ${POSTGRES_DB:-ufc}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ufc}"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
