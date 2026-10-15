@@ -59,14 +59,21 @@ python -m app.ingestion.wikipedia sample     # guarda páginas reales para los t
 
 | Página | Qué se saca |
 |---|---|
-| `List_of_UFC_events`, tabla "Scheduled events" | nombre, fecha, recinto, ciudad y página de cada evento |
+| `List_of_UFC_events`, tabla "Scheduled events" | nombre, fecha, recinto y ciudad de cada evento |
 | Página de cada evento | peleas: tabla con columna "Weight class" y listas "Lightweight bout: A vs. B" |
+
+La lista no enlaza la página de los próximos eventos: se busca por su título.
+- Numerados: primero solo el número ("UFC 333: Volkanovski vs. Evloev" → `UFC_333`) y después el nombre completo.
+- El resto: el nombre completo (`UFC_Fight_Night:_Buckley_vs._Malott`).
+- Si la lista sí enlaza una página, esa se prueba primero.
+
+Un título que no existe (404) pasa al siguiente. La página que llega tiene que llamarse como el evento o como uno de esos títulos. Si no, se descarta: un título puede redirigir a otra página, como "2026 in UFC", y esa no es una cartelera.
 
 Un evento sin página todavía se guarda sin peleas.
 
 ### Permisos
 
-- **robots.txt.** Antes de descargar se lee (`PoliteClient.allowed`). Si permite la API oficial (`/w/api.php`), se usa la API. Si solo permite las páginas de los artículos (`/wiki/...`), se leen esas. Si no permite ninguna, no se descarga nada. `sample` imprime qué permite.
+- **robots.txt.** Antes de descargar se lee (`PoliteClient.allowed`). Si permite la API oficial (`/w/api.php`), se usa la API. Si solo permite las páginas de los artículos (`/wiki/...`), se leen esas. Si no permite ninguna, no se descarga nada. `sample` imprime qué permite. Comprobado el 15/10/2026: no permite la API a programas como este y sí los artículos, así que se leen los artículos.
 - **Normas de la API de Wikimedia.** Piden un User-Agent con contacto y no fijan un límite de peticiones, pero sí que se hagan de una en una. Se envía `ufc-predictor/0.1 (https://github.com/XxruahuxX/ufc-predictor; proyecto de estudiante) httpx/…`, se espera 2 s entre peticiones y hay caché de 6 horas.
 - **Licencia.** El texto de Wikipedia es CC BY-SA. Se guardan datos (fechas, nombres, quién pelea con quién), no texto. La web citará Wikipedia como fuente.
 
@@ -183,7 +190,7 @@ Un evento tiene unas 13 peleas y 26 peleadores: unas 40 peticiones, menos de 2 m
 - `test_kaggle_import.py`: CSV con las columnas del real; dos filas copian datos reales (Allen vs. Duncan). Prueba resultados, esquinas, estadísticas, cuotas y que importar dos veces no duplica.
 - `test_matching.py`: nombres escritos de formas distintas y nombres repetidos.
 - `test_wikipedia_parsers.py`: páginas de ejemplo escritas a mano con la estructura de Wikipedia (títulos nuevos y antiguos, tabla y listas).
-- `test_wikipedia_loader.py`: carteleras que cambian, eventos aplazados o cancelados, descarga simulada por API o por artículo según robots.txt, y unión con el CSV cuando el evento ya se celebró.
+- `test_wikipedia_loader.py`: carteleras que cambian, eventos aplazados o cancelados, descarga simulada por API o por artículo según robots.txt (con páginas que no existen y redirecciones), y unión con el CSV cuando el evento ya se celebró.
 - `test_wikipedia_real.py`: páginas reales. Se saltan hasta que ejecutes `python -m app.ingestion.wikipedia sample`.
 
 Si `sample` no entiende una página, imprime un diagnóstico (estado HTTP, título, cuántos enlaces hay y un trozo del HTML) para poder ajustar el parser sin tener que enviar el archivo.

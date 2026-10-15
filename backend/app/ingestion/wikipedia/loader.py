@@ -1,8 +1,8 @@
 """Guarda en la base de datos los próximos eventos y carteleras de Wikipedia.
 
 Wikipedia no tiene los ids de UFCStats, así que se empareja así:
-    evento    misma fecha (o un día de diferencia, por la zona horaria);
-              si no, uno nuestro con el mismo nombre (cambió de fecha)
+    evento    mismo nombre, aunque haya cambiado de fecha; si no, misma
+              fecha (o un día de diferencia, por la zona horaria)
     peleador  nombre, sin tildes ni mayúsculas (ver matching.py)
     pelea     mismo evento y los mismos dos peleadores, en cualquier orden
 

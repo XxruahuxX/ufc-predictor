@@ -7,13 +7,17 @@ import pytest
 from bs4 import BeautifulSoup
 
 from app.ingestion.wikipedia.parsers import (
+    ScheduledEvent,
     WikipediaError,
+    api_page,
+    article_page,
     fighter_name,
-    html_from_api,
+    guess_titles,
     page_title,
     parse_any_date,
     parse_event_card,
     parse_scheduled_events,
+    same_event,
     table_rows,
     weight_class,
 )
@@ -35,12 +39,14 @@ def test_lista_de_proximos_eventos():
         ("UFC Fight Night: Medić vs. Rodriguez", date(2026, 11, 8)),
         ("UFC Fight Night 287", date(2026, 10, 25)),
     ]
-    sin_pagina, ufc_330, medic, fn_287 = events
-    assert sin_pagina.page is None  # enlace en rojo: la página no existe
-    assert sin_pagina.location is None  # "TBA"
-    assert ufc_330.page == "UFC_330"
+    fn_289, ufc_330, medic, fn_287 = events
+    assert fn_289.location is None  # "TBA"
     assert ufc_330.location == "Madison Square Garden, New York City, New York, U.S."
-    assert medic.page == "UFC_Fight_Night:_Medić_vs._Rodriguez"
+    # Títulos de página que se probarán. Como en la página real, solo uno lleva enlace.
+    assert fn_289.pages == ["UFC_Fight_Night_289"]
+    assert ufc_330.pages == ["UFC_330", "UFC_330:_Makhachev_vs._Machado_Garry"]
+    assert medic.pages == ["UFC_Fight_Night:_Medić_vs._Rodriguez"]
+    assert fn_287.pages == ["UFC_Fight_Night_287"]  # el enlace y el título adivinado coinciden
     # La celda del recinto ocupa dos filas (rowspan): vale para los dos eventos
     assert fn_287.location == medic.location == "Meta Apex, Las Vegas, Nevada, U.S."
 
@@ -52,7 +58,7 @@ def test_lista_con_titulos_antiguos():
     <tr><td><a href="/wiki/UFC_330">UFC 330</a></td><td>15 November 2026</td><td>MSG</td><td>New York</td></tr>
     </table></div>"""
     [event] = parse_scheduled_events(html)
-    assert (event.name, event.date, event.page) == ("UFC 330", date(2026, 11, 15), "UFC_330")
+    assert (event.name, event.date, event.pages) == ("UFC 330", date(2026, 11, 15), ["UFC_330"])
 
 
 def test_lista_con_otro_titulo():
@@ -102,17 +108,58 @@ def test_cartelera_solo_con_peleas_anunciadas():
     assert not any(b.main_event for b in bouts)  # sin tabla no se sabe cuál es la estelar
 
 
+def test_pagina_completa_del_articulo():
+    # Los iconos de arriba (página protegida...) también van en un div
+    # "mw-parser-output", antes del artículo: no se pueden confundir
+    html = ('<html><body><div class="mw-indicators"><div class="mw-parser-output">'
+            '<span>candado</span></div></div><div id="mw-content-text">'
+            + load("event_announced.html") + "</div></body></html>")
+    assert len(parse_event_card(html)) == 4
+
+
 def test_pagina_sin_cartelera():
     assert parse_event_card("<div class='mw-parser-output'><p>Sin peleas.</p></div>") == []
 
 
+def test_titulos_posibles_de_la_pagina_del_evento():
+    # Numerados: primero solo el número, que es como se llaman sus páginas
+    assert guess_titles("UFC 333: Volkanovski vs. Evloev") == ["UFC_333", "UFC_333:_Volkanovski_vs._Evloev"]
+    assert guess_titles("UFC Fight Night: Buckley vs. Malott") == ["UFC_Fight_Night:_Buckley_vs._Malott"]
+    assert guess_titles("UFC Fight Night 295") == ["UFC_Fight_Night_295"]
+
+    # Si la lista enlaza una página, se prueba antes que las adivinadas
+    html = """<h2 id="Scheduled_events">Scheduled events</h2>
+    <table><tr><th>Event</th><th>Date</th></tr><tr>
+    <td><a href="/wiki/UFC_Fight_Night:_Allen_vs._Duncan">UFC Fight Night 289</a></td><td>Nov 22, 2026</td>
+    </tr></table>"""
+    [event] = parse_scheduled_events(html)
+    assert event.pages == ["UFC_Fight_Night:_Allen_vs._Duncan", "UFC_Fight_Night_289"]
+
+
+def test_la_pagina_tiene_que_ser_la_del_evento():
+    event = ScheduledEvent("UFC 333: Volkanovski vs. Evloev", date(2026, 10, 24), None,
+                           guess_titles("UFC 333: Volkanovski vs. Evloev"))
+    assert same_event("UFC 333", event)
+    assert same_event("UFC 333: Volkanovski vs. Evloev", event)
+    # Páginas a las que redirige el título de un evento que aún no tiene la suya
+    assert not same_event("2026 in UFC", event)
+    assert not same_event("List of UFC events", event)
+
+
 def test_respuesta_de_la_api():
     html = "<div class='mw-parser-output'><p>Hola</p></div>"
-    assert html_from_api(json.dumps({"parse": {"title": "X", "text": html}})) == html
-    assert html_from_api(json.dumps({"parse": {"text": {"*": html}}})) == html  # formato antiguo
-    error = json.dumps({"error": {"code": "missingtitle", "info": "The page you specified doesn't exist."}})
-    with pytest.raises(WikipediaError, match="doesn't exist"):
-        html_from_api(error)
+    assert api_page(json.dumps({"parse": {"title": "UFC 330", "text": html}})) == ("UFC 330", html)
+    assert api_page(json.dumps({"parse": {"title": "X", "text": {"*": html}}})) == ("X", html)  # formato antiguo
+    # La página no existe
+    assert api_page(json.dumps({"error": {"code": "missingtitle", "info": "doesn't exist"}})) is None
+    with pytest.raises(WikipediaError, match="too many requests"):
+        api_page(json.dumps({"error": {"code": "ratelimited", "info": "too many requests"}}))
+
+
+def test_pagina_del_articulo():
+    html = "<html><head><title>UFC Fight Night: Medić &amp; Co. - Wikipedia</title></head><body></body></html>"
+    assert article_page(html) == ("UFC Fight Night: Medić & Co.", html)
+    assert article_page("<p>sin título</p>")[0] == ""
 
 
 def test_fechas():

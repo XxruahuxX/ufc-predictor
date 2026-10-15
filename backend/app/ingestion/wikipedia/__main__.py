@@ -51,29 +51,53 @@ class WikipediaReader:
         else:
             raise WikipediaError("robots.txt no permite descargar ni la API ni los artículos")
 
-    def html(self, title: str, max_age: float | None = 6 * HOUR) -> str:
+    def page(self, title: str, max_age: float | None = 6 * HOUR) -> tuple[str, str] | None:
+        """(título real, HTML) de una página. None si no existe."""
         url = api_url(title) if self.route == "api" else article_url(title)
         if not self.client.allowed(url):
             raise WikipediaError(f"robots.txt no permite descargar {url}")
-        text = self.client.get(url, max_age=max_age)
-        return parsers.html_from_api(text) if self.route == "api" else text
+        try:
+            text = self.client.get(url, max_age=max_age)
+        except httpx.HTTPStatusError as err:
+            if err.response.status_code == 404:
+                return None
+            raise
+        return parsers.api_page(text) if self.route == "api" else parsers.article_page(text)
+
+    def event_page(self, event: ScheduledEvent,
+                   max_age: float | None = 6 * HOUR) -> tuple[str, str] | None:
+        """(título, HTML) de la página del evento, o None si aún no tiene.
+
+        Se prueban sus títulos posibles en orden. Una página que existe pero
+        es de otra cosa (un título que redirige a "2026 in UFC") no vale.
+        """
+        for title in event.pages:
+            found = self.page(title, max_age)
+            if found and parsers.same_event(found[0], event):
+                return found
+        return None
 
 
 def read_schedule(reader: WikipediaReader, today: date,
                   max_age: float | None = 6 * HOUR) -> list[tuple[ScheduledEvent, list[Bout] | None]]:
     """Próximos eventos y la cartelera de cada uno (None si no tiene página)."""
+    found = reader.page(LIST_PAGE, max_age)
+    if found is None:
+        raise WikipediaError(f"no existe la página {LIST_PAGE}")
     schedule = []
-    for event in parsers.parse_scheduled_events(reader.html(LIST_PAGE, max_age)):
+    for event in parsers.parse_scheduled_events(found[1]):
         if event.date < today:
             continue
         bouts = None
-        if event.page:
-            try:
-                bouts = parsers.parse_event_card(reader.html(event.page, max_age))
-            except httpx.HTTPStatusError as err:
-                print(f"  No se pudo leer la página {event.page}: error {err.response.status_code}")
-            except WikipediaError as err:
-                print(f"  No se pudo leer la página {event.page}: {err}")
+        try:
+            page = reader.event_page(event, max_age)
+        except httpx.HTTPStatusError as err:
+            print(f"  No se pudo leer la página de {event.name}: error {err.response.status_code}")
+        except WikipediaError as err:
+            print(f"  No se pudo leer la página de {event.name}: {err}")
+        else:
+            if page is not None:
+                bouts = parsers.parse_event_card(page[1])
         schedule.append((event, bouts))
     return sorted(schedule, key=lambda item: item[0].date)
 
@@ -123,9 +147,7 @@ def upcoming(delay: float) -> None:
               " 'python -m app.ingestion.wikipedia sample' y pega lo que salga.")
         return
     for event, bouts in schedule:
-        card = ("sin página todavía" if event.page is None
-                else "no se pudo leer" if bouts is None
-                else f"{len(bouts)} peleas")
+        card = "sin página todavía" if bouts is None else f"{len(bouts)} peleas"
         print(f"  {event.date}  {event.name}: {card}")
 
     with SessionLocal() as session:
@@ -164,7 +186,10 @@ def sample(delay: float) -> None:
     reader = WikipediaReader(client)
     print(route_message(reader))
 
-    html = reader.html(LIST_PAGE, max_age=0)
+    found = reader.page(LIST_PAGE, max_age=0)
+    if found is None:
+        raise WikipediaError(f"no existe la página {LIST_PAGE}")
+    html = found[1]
     (SAMPLE_DIR / "list.html").write_text(html, encoding="utf-8")
     events = sorted(parsers.parse_scheduled_events(html), key=lambda e: e.date)
     print(f"Lista de eventos: {len(events)} programados")
@@ -173,20 +198,20 @@ def sample(delay: float) -> None:
 
     saved, last = 0, ""
     for event in events:
-        if event.page is None:
-            print(f"  {event.date}  {event.name}: sin página todavía")
-            continue
         try:
-            html = reader.html(event.page, max_age=0)
+            page = reader.event_page(event, max_age=0)
         except httpx.HTTPStatusError as err:
             print(f"  {event.date}  {event.name}: error {err.response.status_code}")
             continue
         except WikipediaError as err:
             print(f"  {event.date}  {event.name}: {err}")
             continue
-        last = html
-        bouts = parsers.parse_event_card(html)
-        print(f"  {event.date}  {event.name}: {len(bouts)} peleas")
+        if page is None:
+            print(f"  {event.date}  {event.name}: sin página (probado: {', '.join(event.pages)})")
+            continue
+        title, last = page
+        bouts = parsers.parse_event_card(last)
+        print(f"  {event.date}  {event.name}: {len(bouts)} peleas (página {title})")
         for b in bouts[:3]:
             print(f"      {b.weight_class}: {b.fighter_1} vs. {b.fighter_2}"
                   f"{' (título)' if b.is_title_fight else ''}")

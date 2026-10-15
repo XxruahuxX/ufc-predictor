@@ -17,8 +17,9 @@ del texto ("... bout: A vs. B"), que cambian mucho menos que el diseño.
 """
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
+from html import unescape
 from urllib.parse import unquote
 
 from bs4 import BeautifulSoup, Tag
@@ -43,7 +44,7 @@ CHAMPION = re.compile(r"\((?:c|ic)\)", re.I)  # "(c)" campeón, "(ic)" campeón 
 
 
 class WikipediaError(Exception):
-    """La API devolvió un error, por ejemplo porque la página no existe."""
+    """Wikipedia devolvió un error o robots.txt no permite la descarga."""
 
 
 @dataclass
@@ -51,7 +52,8 @@ class ScheduledEvent:
     name: str
     date: date
     location: str | None
-    page: str | None  # título de su página en Wikipedia; None si aún no tiene
+    # Títulos de página que pueden ser la del evento, en el orden en que se prueban
+    pages: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -67,13 +69,27 @@ class Bout:
 # Funciones de ayuda
 # ---------------------------------------------------------------------------
 
-def html_from_api(json_text: str) -> str:
-    """Saca el HTML de una respuesta de action=parse."""
+def api_page(json_text: str) -> tuple[str, str] | None:
+    """(título, HTML) de una respuesta de action=parse. None si la página no existe."""
     data = json.loads(json_text)
     if "error" in data:
+        if data["error"].get("code") == "missingtitle":
+            return None
         raise WikipediaError(data["error"].get("info", "error desconocido"))
     content = data["parse"]["text"]
-    return content["*"] if isinstance(content, dict) else content  # formatversion 1 o 2
+    html = content["*"] if isinstance(content, dict) else content  # formatversion 1 o 2
+    return data["parse"].get("title", ""), html
+
+
+def article_page(html: str) -> tuple[str, str]:
+    """(título, HTML) de la página de un artículo.
+
+    El título sale de <title>UFC 333 - Wikipedia</title>. Si la dirección
+    pedida era una redirección, es el título de la página de destino.
+    """
+    m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
+    title = clean(unescape(m.group(1))) if m else ""
+    return re.sub(r"\s+[-–—]\s+Wikipedia$", "", title), html
 
 
 def article(html: str) -> Tag:
@@ -81,7 +97,10 @@ def article(html: str) -> Tag:
     soup = BeautifulSoup(html, "html.parser")
     for element in soup.select(HIDDEN):
         element.decompose()
-    return soup.select_one(".mw-parser-output") or soup
+    # En la página completa, el artículo está dentro de #mw-content-text. Hay
+    # otros "mw-parser-output" antes, como los iconos de página protegida.
+    return (soup.select_one("#mw-content-text .mw-parser-output")
+            or soup.select_one(".mw-parser-output") or soup)
 
 
 def tidy(value: str) -> str:
@@ -177,6 +196,28 @@ def own_text(li: Tag) -> str:
     return tidy(" ".join(parts))
 
 
+def guess_titles(name: str) -> list[str]:
+    """Títulos que suele tener la página de un evento.
+
+    La lista de eventos casi nunca enlaza los próximos. Sus páginas se llaman
+    como el evento ('UFC Fight Night: Buckley vs. Malott') o, en los
+    numerados, solo con el número ('UFC 333: Volkanovski vs. Evloev' -> 'UFC 333').
+    """
+    titles = []
+    prefix = name.split(":")[0].strip()
+    if ":" in name and re.search(r"\d", prefix):
+        titles.append(prefix)
+    titles.append(name)
+    return [t.replace(" ", "_") for t in titles]
+
+
+def same_event(title: str, event: ScheduledEvent) -> bool:
+    """¿Es esa página la del evento? Evita leer como cartelera otra página
+    (por ejemplo "2026 in UFC") a la que redirige un título."""
+    names = [event.name, *(t.replace("_", " ") for t in event.pages)]
+    return normalize_name(title) in {normalize_name(n) for n in names}
+
+
 def fighter_name(raw: str) -> str:
     """'Islam Makhachev (c)' -> 'Islam Makhachev'. Quita también '*' y notas entre paréntesis."""
     name = re.sub(r"\([^)]*\)", " ", raw).replace("*", " ")
@@ -232,12 +273,10 @@ def parse_scheduled_events(html: str) -> list[ScheduledEvent]:
             continue  # sin fecha todavía ("TBA")
         parts = (text(cell(row, "venue")), text(cell(row, "location")))
         location = ", ".join(t for t in parts if t and t.upper() not in ("TBA", "TBD"))
-        events.append(ScheduledEvent(
-            name=text(name_cell)[:200],
-            date=event_date,
-            location=location[:200] or None,
-            page=page_title(name_cell.find("a", href=True)),
-        ))
+        name = text(name_cell)[:200]
+        linked = page_title(name_cell.find("a", href=True))  # None si no hay enlace
+        pages = list(dict.fromkeys(([linked] if linked else []) + guess_titles(name)))
+        events.append(ScheduledEvent(name, event_date, location[:200] or None, pages))
     return events
 
 
