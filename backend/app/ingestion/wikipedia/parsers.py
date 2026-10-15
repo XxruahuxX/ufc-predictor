@@ -41,6 +41,8 @@ ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})")  # 2026-09-05
 # "Women's Flyweight bout: Veronica Hardy vs. Dione Barbosa"
 ANNOUNCED = re.compile(r"^(?P<weight>.+?)\s+bout:\s*(?P<a>.+?)\s+vs\.?\s+(?P<b>.+?)$", re.I)
 CHAMPION = re.compile(r"\((?:c|ic)\)", re.I)  # "(c)" campeón, "(ic)" campeón interino
+# Rival que aún no se sabe: "TBD", "TBA", "To be determined"...
+PLACEHOLDER = re.compile(r"^(?:tb[acd]|to be (?:announced|confirmed|determined))$")
 
 
 class WikipediaError(Exception):
@@ -219,9 +221,12 @@ def same_event(title: str, event: ScheduledEvent) -> bool:
 
 
 def fighter_name(raw: str) -> str:
-    """'Islam Makhachev (c)' -> 'Islam Makhachev'. Quita también '*' y notas entre paréntesis."""
-    name = re.sub(r"\([^)]*\)", " ", raw).replace("*", " ")
-    return clean(name)
+    """'Islam Makhachev (c)' -> 'Islam Makhachev'. Quita también '*' y notas entre paréntesis.
+
+    Si el rival aún no se sabe ('TBD') devuelve "": esa pelea no se guarda.
+    """
+    name = clean(re.sub(r"\([^)]*\)", " ", raw).replace("*", " "))
+    return "" if PLACEHOLDER.match(normalize_name(name)) else name
 
 
 def weight_class(raw: str) -> tuple[str | None, bool]:

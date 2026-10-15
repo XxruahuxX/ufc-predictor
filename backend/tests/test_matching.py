@@ -12,6 +12,9 @@ def test_variantes_de_un_nombre():
     assert name_keys("Khalil Rountree Jr.") == {"khalil rountree", "khalilrountree"}
     assert name_keys("Da Woon Jung") & name_keys("Dawoon Jung")  # con y sin espacio
     assert name_keys("Zhang Weili") & name_keys("Weili Zhang")  # orden de las palabras
+    # Nombres coreanos: Wikipedia pone el apellido delante y un guion
+    assert name_keys("Lee Jeong-yeong") & name_keys("JeongYeong Lee")
+    assert name_keys("Lee Jeong-yeong") & name_keys("Jeong Yeong Lee")
     assert not name_keys("Bruno Silva") & name_keys("Bruno Silvas")
     assert name_keys("Jr.") == set()
 
@@ -48,6 +51,18 @@ def test_el_exacto_gana_a_las_variantes():
     exacto = peleador("Weili Zhang", ufcstats_id="1")
     al_reves = peleador("Zhang Weili", ufcstats_id="2")
     assert FighterIndex([exacto, al_reves]).find("Weili Zhang") == [exacto]
+
+
+def test_nombres_parecidos():
+    abus = peleador("Abus Magomedov", "Middleweight", "a")
+    otro = peleador("Abubakar Magomedov", "Lightweight", "b")
+    ko = peleador("SeokHyun Ko", "Welterweight", "c")
+    sin_id = peleador("Abusupiyan Magomedov")  # creado por Wikipedia: no se sugiere
+    index = FighterIndex([abus, otro, ko, sin_id])
+
+    assert index.similar("Abusupiyan Magomedov") == ["Abus Magomedov"]
+    assert index.similar("Ko Seok-hyeon") == ["SeokHyun Ko"]  # apellido delante
+    assert index.similar("Cristian Pérez") == []
 
 
 def test_quitar_del_indice():

@@ -104,6 +104,7 @@ def test_cartelera_solo_con_peleas_anunciadas():
         ("Featherweight", "Alexander Volkanovski", "Diego Lopes", True),
         ("Middleweight", "Brad Tavares", "Marc-André Barriault", False),
         ("Bantamweight", "Farid Basharat", "Ethyn Ewing", False),
+        # "Mateusz Gamrot vs. TBD" no sale: aún no tiene rival
     ]
     assert not any(b.main_event for b in bouts)  # sin tabla no se sabe cuál es la estelar
 
@@ -180,6 +181,8 @@ def test_categorias_y_nombres():
     assert weight_class("") == (None, False)
     assert fighter_name("Islam Makhachev (c)") == "Islam Makhachev"
     assert fighter_name("Jon Jones (ic) *") == "Jon Jones"
+    # Rival por decidir: no es un peleador
+    assert fighter_name("TBD") == fighter_name("TBA") == fighter_name("To be determined") == ""
 
 
 def test_titulo_de_pagina():

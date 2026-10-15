@@ -29,9 +29,13 @@ def name_keys(name: str) -> set[str]:
 
     'Khalil Rountree Jr.' -> {'khalil rountree', 'khalilrountree'}
     Coinciden: con y sin "Jr.", 'Da Woon Jung' y 'Dawoon Jung',
-    'Zhang Weili' y 'Weili Zhang' (orden de las palabras).
+    'Zhang Weili' y 'Weili Zhang' (orden de las palabras), y
+    'Lee Jeong-yeong' y 'JeongYeong Lee' (Wikipedia escribe los nombres
+    coreanos con el apellido delante y un guion; UFCStats, al revés y junto).
     """
-    words = [w for w in normalize_name(name).split() if w not in SUFFIXES]
-    if not words:
-        return set()
-    return {" ".join(words), "".join(words), " ".join(sorted(words))}
+    keys = set()
+    for variant in (name, name.replace("-", "")):  # guion como espacio y como nada
+        words = [w for w in normalize_name(variant).split() if w not in SUFFIXES]
+        if words:
+            keys |= {" ".join(words), "".join(words), " ".join(sorted(words))}
+    return keys
