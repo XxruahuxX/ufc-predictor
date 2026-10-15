@@ -1,0 +1,51 @@
+[
+  {
+    "id": "aaa111",
+    "sport_key": "mma_mixed_martial_arts",
+    "sport_title": "MMA",
+    "commence_time": "2026-11-09T03:00:00Z",
+    "home_team": "Oscar Doce",
+    "away_team": "Alpha Nueve",
+    "bookmakers": [
+      {
+        "key": "unibet_eu",
+        "title": "Unibet",
+        "last_update": "2026-10-15T10:00:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-15T10:00:00Z",
+            "outcomes": [
+              {"name": "Alpha Nueve", "price": 1.5},
+              {"name": "Oscar Doce", "price": 2.7}
+            ]
+          }
+        ]
+      },
+      {
+        "key": "pinnacle",
+        "title": "Pinnacle",
+        "last_update": "2026-10-15T11:30:00Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-10-15T11:30:00Z",
+            "outcomes": [
+              {"name": "Oscar Doce", "price": 2.85},
+              {"name": "Alpha Nueve", "price": 1.48}
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "bbb222",
+    "sport_key": "mma_mixed_martial_arts",
+    "sport_title": "MMA",
+    "commence_time": "2026-11-15T20:00:00Z",
+    "home_team": "Peleador De Otra Liga",
+    "away_team": "Otro Peleador",
+    "bookmakers": []
+  }
+]

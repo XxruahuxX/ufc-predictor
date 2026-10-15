@@ -2,6 +2,29 @@
 
 Código: [`backend/app/ingestion/`](../backend/app/ingestion/).
 
+## Aviso: UFCStats bloquea programas (15/10/2026)
+
+Desde un programa, `ufcstats.com` devuelve una página "Checking your browser…" que exige JavaScript y una prueba de trabajo. Es una barrera anti-bots puesta a propósito. **No se intenta saltar.** El código de UFCStats se conserva porque sus parsers sirven para páginas guardadas a mano desde el navegador.
+
+Alternativas en estudio:
+- Histórico: datasets de Kaggle derivados de UFCStats (descarga manual). `python -m app.ingestion.inspect_csv data/kaggle` muestra columnas y filas de ejemplo para escribir el importador.
+- Próximas peleas y cuotas: The Odds API (abajo).
+
+## The Odds API
+
+Código: [`backend/app/ingestion/odds_api.py`](../backend/app/ingestion/odds_api.py). API oficial con clave gratuita: 500 créditos al mes. Una consulta de cuotas de MMA con 1 mercado (`h2h`) y 1 región (`eu`) cuesta 1 crédito. Caché de 6 horas.
+
+```bash
+# en .env (raíz del proyecto):  ODDS_API_KEY=tu_clave
+python -m app.ingestion.odds_api
+```
+
+- Empareja cada pelea de la API con una pelea programada de la base de datos: mismos dos peleadores (nombre o alias, sin tildes ni mayúsculas) y fecha a ±2 días.
+- Orienta las cuotas a nuestras esquinas A y B.
+- Lista las peleas que no encuentra. `mma_mixed_martial_arts` incluye otras organizaciones además de UFC.
+- `no_vig_probability()` quita el margen de la casa: cuotas 1,50 y 2,70 → P(A) = 0,643.
+- Si la API da error, no se muestra la URL porque contiene la clave.
+
 ## Permisos
 
 `ufcstats.com/robots.txt` no existe (404, comprobado el 15/10/2026), así que el sitio no declara restricciones. Aun así:

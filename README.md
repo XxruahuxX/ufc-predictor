@@ -40,9 +40,11 @@ A partir de aquí, `python` significa `.\.venv\Scripts\python.exe` en Windows o 
 ```bash
 python -m app.db.init_db                         # crea las tablas
 python -m pytest                                 # tests
-python -m app.ingestion.ufcstats upcoming        # próximos eventos
-python -m app.ingestion.ufcstats completed --limit 3   # últimos 3 eventos
+python -m app.ingestion.odds_api                 # cuotas (necesita ODDS_API_KEY en .env)
+python -m app.ingestion.inspect_csv data/kaggle  # ver columnas de unos CSV
 ```
+
+> UFCStats bloquea programas desde octubre de 2026. Ver [docs/03-ingesta.md](docs/03-ingesta.md).
 
 ## Problemas frecuentes en Windows
 
