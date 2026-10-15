@@ -4,4 +4,7 @@ Aplicación web que predice peleas de la UFC combinando un modelo estadístico p
 
 > Las predicciones son informativas y no garantizan resultados.
 
-Estado: fase 1 (arquitectura). Ver [docs/01-arquitectura.md](docs/01-arquitectura.md).
+Estado: fase 2 (esquema de base de datos).
+
+- [Fase 1: arquitectura](docs/01-arquitectura.md)
+- [Fase 2: esquema](docs/02-esquema.md)
