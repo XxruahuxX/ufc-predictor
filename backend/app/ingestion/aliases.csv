@@ -1,0 +1,6 @@
+# Peleadores que otra fuente escribe distinto que UFCStats (ver aliases.py).
+# Una fila por alias: el nombre en la otra fuente y el nombre en UFCStats,
+# que es el del CSV de Kaggle. Solo si se ha comprobado que es la misma persona.
+# Edítalo con un editor de texto: Excel en español guarda con ";" y no se leería.
+otro_nombre,nombre_ufcstats
+Abusupiyan Magomedov,Abus Magomedov

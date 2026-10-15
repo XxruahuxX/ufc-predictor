@@ -119,11 +119,18 @@ def print_report(r: SyncReport) -> None:
         print(f"  borrado (ya no está en Wikipedia): {name}")
     print(f"Peleas: {r.fights_new} nuevas, {r.fights_updated} actualizadas,"
           f" {r.fights_cancelled} canceladas")
-    if r.fighters_new:
-        print(f"Peleadores nuevos: {len(r.fighters_new)}. Son debutantes o su nombre"
-              " se escribe distinto que en el CSV:")
-        for name in r.fighters_new:
-            print(f"  {name}")
+    print(f"Peleadores: {len(r.fighters_new)} nuevos, {len(r.merged)} unidos con el CSV")
+    for line in r.merged:
+        print(f"  unido: {line}")
+    if r.unknown:
+        print(f"No están en el CSV: {len(r.unknown)}. Son debutantes o su nombre se escribe"
+              " distinto. Si es lo segundo, apunta el alias en app/ingestion/aliases.csv:")
+        for line in r.unknown:
+            print(f"  {line}")
+    if r.alias_problems:
+        print("Alias de aliases.csv que no se han podido guardar:")
+        for line in r.alias_problems:
+            print(f"  {line}")
     if r.skipped:
         print("Peleas no guardadas:")
         for reason in r.skipped:
@@ -133,6 +140,7 @@ def print_report(r: SyncReport) -> None:
 def upcoming(delay: float) -> None:
     from app.db.init_db import create_tables
     from app.db.session import SessionLocal
+    from app.ingestion.aliases import read_aliases
     from app.ingestion.wikipedia.loader import sync_upcoming
 
     if not create_tables():  # por si aún no existen; avisa si PostgreSQL no responde
@@ -151,7 +159,7 @@ def upcoming(delay: float) -> None:
         print(f"  {event.date}  {event.name}: {card}")
 
     with SessionLocal() as session:
-        report = sync_upcoming(session, schedule, today)
+        report = sync_upcoming(session, schedule, today, read_aliases())
         session.commit()
     print_report(report)
 

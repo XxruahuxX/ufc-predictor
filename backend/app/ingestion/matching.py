@@ -5,6 +5,7 @@ Wikipedia no usa los ids de UFCStats: solo da nombres. Para saber si
 nombres normalizados (ver names.py).
 """
 from collections import defaultdict
+from difflib import get_close_matches
 from typing import Iterable
 
 from app.db.models import Fighter
@@ -69,3 +70,19 @@ class FighterIndex:
                 found = known or found
             return found
         return []
+
+    def similar(self, name: str, n: int = 2) -> list[str]:
+        """Nombres de peleadores del CSV parecidos a este, de más a menos.
+
+        'Abusupiyan Magomedov' -> ['Abus Magomedov']. Es solo una pista para
+        el resumen: no une a nadie. Se comparan las palabras ordenadas, así
+        no cuenta si el apellido va delante ('Ko Seok-hyeon' / 'SeokHyun Ko').
+        """
+        names = {sorted_words(f.name): f.name
+                 for fighters in self.exact.values() for f in fighters if f.ufcstats_id}
+        return [names[key] for key in get_close_matches(sorted_words(name), list(names), n, cutoff=0.75)]
+
+
+def sorted_words(name: str) -> str:
+    """'Ko Seok-hyeon' -> 'ko seokhyeon'."""
+    return " ".join(sorted(normalize_name(name.replace("-", "")).split()))

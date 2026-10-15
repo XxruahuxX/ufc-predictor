@@ -84,7 +84,7 @@ Wikipedia no tiene los ids de UFCStats: se compara por nombre y fecha.
 | Qué | Cómo se reconoce |
 |---|---|
 | Evento | Mismo nombre, aunque cambie de fecha. Si no, misma fecha (±1 día por la zona horaria). |
-| Peleador | Nombre sin tildes ni mayúsculas, o un alias. Si no, variantes: sin "Jr.", sin espacios ("Da Woon" = "Dawoon"), palabras en otro orden ("Zhang Weili" = "Weili Zhang"). |
+| Peleador | Nombre sin tildes ni mayúsculas, o un alias (ver "Alias"). Si no, variantes: sin "Jr.", sin espacios ("Da Woon" = "Dawoon"), palabras en otro orden ("Zhang Weili" = "Weili Zhang") y nombres coreanos ("Lee Jeong-yeong" = "JeongYeong Lee"). |
 | Pelea | Mismo evento y mismos dos peleadores, en cualquier orden. |
 
 Decisiones:
@@ -94,9 +94,18 @@ Decisiones:
 - **Dos peleadores con el mismo nombre.** Decide la categoría de la pelea. Si sigue la duda, la pelea no se guarda y sale en el resumen.
 - **Pelea que desaparece de la cartelera:** `cancelled`. Si vuelve, `scheduled` otra vez.
 - **Evento creado por Wikipedia que desaparece de la lista** (cancelado, o con otra fecha y otro nombre): se borra con sus peleas. Si la lista llega vacía, no se borra nada.
+- **Rival por decidir** ("TBD", "TBA"): la pelea no se guarda hasta que se sepa.
 - **Nunca se tocan** eventos pasados, peleas con resultado ni el nombre de un evento que viene de UFCStats.
 
-Al terminar imprime un resumen. "Peleadores nuevos" lista los debutantes y los nombres que no se han reconocido: si sale alguien conocido, su nombre se escribe distinto en las dos fuentes.
+### Alias
+
+Hay cambios de nombre que no se pueden adivinar, como un diminutivo: Wikipedia dice "Abusupiyan Magomedov" y UFCStats, "Abus Magomedov". Se apuntan a mano en [`aliases.csv`](../backend/app/ingestion/aliases.csv): el nombre en la otra fuente y el de UFCStats. Solo si se ha comprobado que es la misma persona.
+
+En cada `upcoming`:
+1. Los alias del archivo que falten se guardan en `fighter_aliases`. El archivo está en el repositorio para no perderlos si se vuelve a crear la base de datos.
+2. Los peleadores que creó Wikipedia y que ahora se reconocen se unen con los del CSV. Sus peleas pasan al del CSV (la misma fila, con las mismas esquinas) y el duplicado se borra.
+
+El resumen lista los peleadores de las carteleras que no están en el CSV: debutantes o nombres escritos de otra forma. Si hay uno parecido en el CSV, lo sugiere ("Timothy Cuamba: ¿es Timmy Cuamba?"). Es solo una pista: no une a nadie.
 
 ### Cuando el CSV trae el evento celebrado
 
@@ -143,6 +152,7 @@ Wikipedia: ver su sección. Ahí robots.txt se comprueba en cada ejecución.
 |---|---|
 | `http.py` | Cliente HTTP común: rate limit por dominio, caché, reintentos (2 s, 4 s, 8 s) y comprobación de robots.txt. Todos los conectores lo usan. |
 | `names.py`, `matching.py` | Comparar nombres de peleadores entre fuentes. |
+| `aliases.py`, `aliases.csv` | Nombres que otra fuente escribe distinto, apuntados a mano. |
 | `ufcstats/parsers.py` | HTML → datos. No toca red ni base de datos. |
 | `ufcstats/loader.py` | Datos → base de datos. Upsert por `ufcstats_id`: repetir no duplica. |
 | `ufcstats/pipeline.py` | Une las dos: qué páginas pedir, en qué orden y con qué caché. |
@@ -188,9 +198,9 @@ Un evento tiene unas 13 peleas y 26 peleadores: unas 40 peticiones, menos de 2 m
 - `test_ingestion.py`: caché, rate limit, reintentos y pipeline completo contra un UFCStats simulado.
 - `test_ufcstats_real.py`: páginas reales. Se saltan hasta que ejecutes `python -m app.ingestion.ufcstats.sample`.
 - `test_kaggle_import.py`: CSV con las columnas del real; dos filas copian datos reales (Allen vs. Duncan). Prueba resultados, esquinas, estadísticas, cuotas y que importar dos veces no duplica.
-- `test_matching.py`: nombres escritos de formas distintas y nombres repetidos.
+- `test_matching.py`: nombres escritos de formas distintas, nombres repetidos y sugerencias de nombres parecidos.
 - `test_wikipedia_parsers.py`: páginas de ejemplo escritas a mano con la estructura de Wikipedia (títulos nuevos y antiguos, tabla y listas).
-- `test_wikipedia_loader.py`: carteleras que cambian, eventos aplazados o cancelados, descarga simulada por API o por artículo según robots.txt (con páginas que no existen y redirecciones), y unión con el CSV cuando el evento ya se celebró.
+- `test_wikipedia_loader.py`: carteleras que cambian, eventos aplazados o cancelados, descarga simulada por API o por artículo según robots.txt (con páginas que no existen y redirecciones), alias y duplicados, y unión con el CSV cuando el evento ya se celebró.
 - `test_wikipedia_real.py`: páginas reales. Se saltan hasta que ejecutes `python -m app.ingestion.wikipedia sample`.
 
 Si `sample` no entiende una página, imprime un diagnóstico (estado HTTP, título, cuántos enlaces hay y un trozo del HTML) para poder ajustar el parser sin tener que enviar el archivo.

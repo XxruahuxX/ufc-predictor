@@ -11,7 +11,8 @@ import httpx
 import pytest
 from sqlalchemy import func, select
 
-from app.db.models import Event, Fight, Fighter, FightResult
+from app.db.models import Event, Fight, Fighter, FighterAlias, FightResult
+from app.ingestion.aliases import read_aliases
 from app.ingestion.http import PoliteClient
 from app.ingestion.kaggle_import import import_csv
 from app.ingestion.wikipedia.__main__ import WikipediaReader, read_schedule
@@ -225,6 +226,72 @@ def test_no_toca_eventos_de_ufcstats_ni_peleas_con_resultado(session, conocidos)
     assert event.location == "Meta Apex, Las Vegas"  # solo se rellena lo que faltaba
     assert (fight.status, fight.scheduled_rounds) == ("completed", 3)
     assert contar(session, Fight) == 1
+
+
+def test_un_alias_une_al_debutante_con_el_del_csv(session, conocidos):
+    nuevo_peleador(session, "Abus Magomedov", "Middleweight", "f006")
+    schedule = [(evento("UFC 333", date(2026, 10, 24)), [
+        combate("Abusupiyan Magomedov", "Brendan Allen", "Middleweight", estelar=True),
+    ])]
+    alias = [("Abusupiyan Magomedov", "Abus Magomedov")]
+
+    # Sin alias parece un debutante. El resumen da una pista.
+    report = sync_upcoming(session, schedule, HOY)
+    session.commit()
+    assert report.fighters_new == ["Abusupiyan Magomedov (UFC 333)"]
+    assert report.unknown == ["Abusupiyan Magomedov (UFC 333): ¿es Abus Magomedov?"]
+    fight = session.scalar(select(Fight))
+
+    # Con el alias se unen: la pelea es la misma fila y conserva sus esquinas
+    report = sync_upcoming(session, schedule, HOY, alias)
+    session.commit()
+    assert report.merged == ["Abusupiyan Magomedov = Abus Magomedov"]
+    assert (report.fights_new, report.fights_updated, report.fights_cancelled) == (0, 1, 0)
+    assert report.unknown == []
+    assert (fight.fighter_a.name, fight.fighter_b.name) == ("Abus Magomedov", "Brendan Allen")
+    assert contar(session, Fight) == 1
+    assert session.scalar(select(func.count()).where(Fighter.name == "Abusupiyan Magomedov")) == 0
+
+    # Repetir no cambia nada: el alias se guarda una vez
+    report = sync_upcoming(session, schedule, HOY, alias)
+    session.commit()
+    assert (report.merged, report.fighters_new, report.alias_problems) == ([], [], [])
+    assert contar(session, FighterAlias) == 1
+
+
+def test_une_los_duplicados_que_dejo_una_version_anterior(session, conocidos):
+    # Antes no se reconocían los nombres coreanos de Wikipedia: se creaba
+    # "Lee Jeong-yeong" aunque en la base de datos estuviera "JeongYeong Lee"
+    schedule = [(evento("UFC 333", date(2026, 10, 24)), [combate("Lee Jeong-yeong", "Brendan Allen")])]
+    sync_upcoming(session, schedule, HOY)
+    real = nuevo_peleador(session, "JeongYeong Lee", "Lightweight", "f007")
+    session.commit()
+
+    report = sync_upcoming(session, schedule, HOY)
+    session.commit()
+    assert report.merged == ["Lee Jeong-yeong = JeongYeong Lee"]
+    assert real in (session.scalar(select(Fight)).fighter_a, session.scalar(select(Fight)).fighter_b)
+    assert (report.fights_new, report.fights_cancelled) == (0, 0)
+
+
+def test_leer_el_archivo_de_alias(tmp_path):
+    assert ("Abusupiyan Magomedov", "Abus Magomedov") in read_aliases()  # el del repositorio
+    # Guardado con el Bloc de notas: marca al principio y saltos de línea de Windows
+    path = tmp_path / "aliases.csv"
+    path.write_bytes("\ufeff# comentario\r\notro_nombre,nombre_ufcstats\r\nJosé Uno,Jose Uno\r\n".encode())
+    assert read_aliases(path) == [("José Uno", "Jose Uno")]
+
+
+def test_alias_que_no_se_pueden_guardar(session, conocidos):
+    nuevo_peleador(session, "Bruno Silva", "Middleweight", "b001")
+    nuevo_peleador(session, "Bruno Silva", "Flyweight", "b002")
+    report = sync_upcoming(session, [], HOY, [("Bruno Gustavo da Silva", "Bruno Silva"),
+                                              ("Abusupiyan Magomedov", "Abus Magomedov")])
+    assert report.alias_problems == [
+        "Bruno Gustavo da Silva -> Bruno Silva: hay 2 con ese nombre",
+        "Abusupiyan Magomedov -> Abus Magomedov: no está en la base de datos",
+    ]
+    assert contar(session, FighterAlias) == 0
 
 
 # ---------------------------------------------------------------------------
