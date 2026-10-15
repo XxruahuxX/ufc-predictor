@@ -56,3 +56,7 @@ Un evento tiene unas 13 peleas y 26 peleadores: unas 40 peticiones, menos de 2 m
 - `test_ufcstats_parsers.py`: páginas de ejemplo escritas a mano con la estructura de UFCStats.
 - `test_ingestion.py`: caché, rate limit, reintentos y pipeline completo contra un UFCStats simulado.
 - `test_ufcstats_real.py`: páginas reales. Se saltan hasta que ejecutes `python -m app.ingestion.ufcstats.sample`.
+
+Si `sample` no entiende una página, imprime un diagnóstico (estado HTTP, título, cuántos enlaces hay y un trozo del HTML) para poder ajustar el parser sin tener que enviar el archivo.
+
+Los parsers buscan los datos por la forma de los enlaces (`/event-details/`, `/fight-details/`, `/fighter-details/`) antes que por clases CSS, porque las URLs cambian mucho menos que el diseño.

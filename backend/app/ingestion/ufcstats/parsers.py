@@ -13,10 +13,18 @@ Páginas que se leen:
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
 BASE_URL = "http://ufcstats.com"
+
+# Buscamos los datos por la forma de sus enlaces (/event-details/, /fighter-details/...)
+# y no solo por clases CSS: las URLs cambian mucho menos que el diseño de la web.
+EVENT_LINK = re.compile(r"/event-details/")
+FIGHT_LINK = re.compile(r"/fight-details/")
+FIGHTER_LINK = re.compile(r"/fighter-details/")
+DATE_IN_TEXT = re.compile(r"[A-Z][a-z]+\.? \d{1,2}, \d{4}")  # "November 08, 2026"
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +114,7 @@ def clean(text: str | None) -> str:
 
 def id_from_url(url: str) -> str:
     """'http://ufcstats.com/fighter-details/abc123' -> 'abc123'"""
-    return url.rstrip("/").split("/")[-1]
+    return urlparse(url).path.rstrip("/").split("/")[-1]
 
 
 def parse_date(text: str) -> date | None:
@@ -194,16 +202,27 @@ def parse_event_list(html: str) -> list[EventSummary]:
     """Lista de eventos (próximos o pasados)."""
     soup = BeautifulSoup(html, "html.parser")
     events = []
-    for row in soup.select("tr.b-statistics__table-row"):
-        link = row.select_one("a.b-link")
-        if not link:
-            continue  # filas vacías de separación
-        cells = row.find_all("td")
-        date_span = row.select_one("span.b-statistics__date")
+    seen = set()
+    for link in soup.find_all("a", href=EVENT_LINK):
+        event_id = id_from_url(link["href"])
+        if event_id in seen:
+            continue
+        seen.add(event_id)
+
+        row = link.find_parent("tr")
+        cells = row.find_all("td") if row else []
+        # La fecha va en <span class="b-statistics__date">. Si no está,
+        # buscamos algo con forma de fecha en el texto de la fila.
+        date_span = row.select_one("span.b-statistics__date") if row else None
+        date_text = date_span.get_text() if date_span else ""
+        if not date_text and row:
+            match = DATE_IN_TEXT.search(clean(row.get_text(" ")))
+            date_text = match.group() if match else ""
+
         events.append(EventSummary(
-            ufcstats_id=id_from_url(link["href"]),
+            ufcstats_id=event_id,
             name=clean(link.get_text()),
-            date=parse_date(date_span.get_text()) if date_span else None,
+            date=parse_date(date_text),
             location=clean(cells[1].get_text()) if len(cells) > 1 else None,
         ))
     return events
@@ -220,11 +239,11 @@ def parse_event_detail(html: str, ufcstats_id: str) -> EventDetail:
         location=info.get("location"),
     )
 
-    rows = soup.select("tbody tr.b-fight-details__table-row")
+    rows = soup.find_all("tr", attrs={"data-link": FIGHT_LINK})
     for order, row in enumerate(rows, start=1):
         cols = row.find_all("td")
-        fighter_links = cols[1].select("a")
-        if len(fighter_links) < 2:
+        fighter_links = row.find_all("a", href=FIGHTER_LINK)
+        if len(fighter_links) < 2 or len(cols) < 10:
             continue
         ids = (id_from_url(fighter_links[0]["href"]), id_from_url(fighter_links[1]["href"]))
         names = (clean(fighter_links[0].get_text()), clean(fighter_links[1].get_text()))
@@ -282,7 +301,7 @@ def parse_fight_detail(html: str, ufcstats_id: str) -> FightDetail:
             """Cada celda tiene dos <p>: uno por peleador."""
             return [clean(p.get_text()) for p in cols[i].find_all("p")]
 
-        links = cols[0].select("a")
+        links = cols[0].find_all("a", href=FIGHTER_LINK)
         kd, sig, tot, td = pair(1), pair(2), pair(4), pair(5)
         sub, ctrl = pair(7), pair(9)
         for k in range(2):

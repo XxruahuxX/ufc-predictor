@@ -14,7 +14,10 @@ pytestmark = pytest.mark.skipif(not REAL.exists(), reason="no hay páginas reale
 
 
 def load(name: str) -> str:
-    return (REAL / name).read_text(encoding="utf-8")
+    path = REAL / name
+    if not path.exists():
+        pytest.skip(f"falta {name}: vuelve a ejecutar el comando sample")
+    return path.read_text(encoding="utf-8")
 
 
 def test_lista_real():
