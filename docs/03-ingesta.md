@@ -99,13 +99,13 @@ Decisiones:
 
 ### Alias
 
-Hay cambios de nombre que no se pueden adivinar, como un diminutivo: Wikipedia dice "Abusupiyan Magomedov" y UFCStats, "Abus Magomedov". Se apuntan a mano en [`aliases.csv`](../backend/app/ingestion/aliases.csv): el nombre en la otra fuente y el de UFCStats. Solo si se ha comprobado que es la misma persona.
+Hay cambios de nombre que no se pueden adivinar, como un diminutivo: Wikipedia dice "Abusupiyan Magomedov" y UFCStats, "Abus Magomedov". Se apuntan a mano en [`aliases.csv`](../backend/app/ingestion/aliases.csv): el nombre en la otra fuente, el de UFCStats y la página donde se ha comprobado que es la misma persona.
 
 En cada `upcoming`:
 1. Los alias del archivo que falten se guardan en `fighter_aliases`. El archivo está en el repositorio para no perderlos si se vuelve a crear la base de datos.
 2. Los peleadores que creó Wikipedia y que ahora se reconocen se unen con los del CSV. Sus peleas pasan al del CSV (la misma fila, con las mismas esquinas) y el duplicado se borra.
 
-El resumen lista los peleadores de las carteleras que no están en el CSV: debutantes o nombres escritos de otra forma. Si hay uno parecido en el CSV, lo sugiere ("Timothy Cuamba: ¿es Timmy Cuamba?"). Es solo una pista: no une a nadie.
+El resumen lista los peleadores de las carteleras que no están en el CSV: debutantes o nombres escritos de otra forma. Si en el CSV hay uno con el nombre y el apellido parecidos, lo sugiere ("Timothy Cuamba: ¿es Timmy Cuamba?"). Es solo una pista: no une a nadie.
 
 ### Cuando el CSV trae el evento celebrado
 

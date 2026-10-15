@@ -5,11 +5,11 @@ Wikipedia no usa los ids de UFCStats: solo da nombres. Para saber si
 nombres normalizados (ver names.py).
 """
 from collections import defaultdict
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 from typing import Iterable
 
 from app.db.models import Fighter
-from app.ingestion.names import name_keys, normalize_name
+from app.ingestion.names import SUFFIXES, name_keys, normalize_name
 
 
 def is_catchweight(weight_class: str) -> bool:
@@ -77,12 +77,36 @@ class FighterIndex:
         'Abusupiyan Magomedov' -> ['Abus Magomedov']. Es solo una pista para
         el resumen: no une a nadie. Se comparan las palabras ordenadas, así
         no cuenta si el apellido va delante ('Ko Seok-hyeon' / 'SeokHyun Ko').
+        Además, el apellido tiene que parecerse: 'Nick Galanti' no sugiere
+        'Nick Agallar' aunque el nombre completo se parezca.
         """
         names = {sorted_words(f.name): f.name
                  for fighters in self.exact.values() for f in fighters if f.ufcstats_id}
-        return [names[key] for key in get_close_matches(sorted_words(name), list(names), n, cutoff=0.75)]
+        close = get_close_matches(sorted_words(name), list(names), 5, cutoff=0.75)
+        return [names[key] for key in close if same_surname(name, names[key])][:n]
+
+
+def words(name: str) -> list[str]:
+    """'Ko Seok-hyeon Jr.' -> ['ko', 'seokhyeon']: sin guiones ni sufijos."""
+    return [w for w in normalize_name(name.replace("-", "")).split() if w not in SUFFIXES]
 
 
 def sorted_words(name: str) -> str:
     """'Ko Seok-hyeon' -> 'ko seokhyeon'."""
-    return " ".join(sorted(normalize_name(name.replace("-", "")).split()))
+    return " ".join(sorted(words(name)))
+
+
+def same_surname(a: str, b: str) -> bool:
+    """La última palabra de cada nombre se parece a alguna del otro.
+
+    'Timothy Cuamba' / 'Timmy Cuamba': sí. 'Alik Lorenz' / 'Lorenz Larkin':
+    no, porque 'Larkin' no se parece a nada de 'Alik Lorenz'. Mirar las
+    dos direcciones vale también para los nombres coreanos, que llevan el
+    apellido delante en Wikipedia ('Ko Seok-hyeon' / 'SeokHyun Ko').
+    """
+    wa, wb = words(a), words(b)
+
+    def fits(word: str, others: list[str]) -> bool:
+        return any(SequenceMatcher(None, word, other).ratio() >= 0.8 for other in others)
+
+    return bool(wa and wb) and fits(wa[-1], wb) and fits(wb[-1], wa)
