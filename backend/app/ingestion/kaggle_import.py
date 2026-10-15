@@ -22,6 +22,7 @@ ufcstats_id) y no duplica nada.
 import argparse
 import csv
 import math
+import sys
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -576,24 +577,25 @@ def print_totals(session: Session) -> None:
 
 
 def main() -> None:
-    from app.db.models import Base
-    from app.db.session import SessionLocal, engine
+    from app.db.init_db import create_tables
+    from app.db.session import SessionLocal
 
     parser = argparse.ArgumentParser(description="Importa el histórico de peleas desde el CSV de Kaggle")
     parser.add_argument("csv", type=Path, help="p. ej. data/kaggle/UFC_full_data_silver_v2.csv")
     args = parser.parse_args()
     if not args.csv.is_file():
         print(f"No encuentro el archivo {args.csv.resolve()}")
-        return
+        sys.exit(1)
 
-    Base.metadata.create_all(engine)  # por si aún no existen las tablas
+    if not create_tables():  # por si aún no existen; avisa si PostgreSQL no responde
+        sys.exit(1)
     start = time.perf_counter()
     with SessionLocal() as session:
         try:
             report = import_csv(session, args.csv)
         except WrongCsvError as err:
             print(err)
-            return
+            sys.exit(1)
         session.commit()
         print_report(report)
         print_totals(session)

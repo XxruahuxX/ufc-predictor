@@ -1,8 +1,9 @@
 """Línea de comandos de la ingesta de UFCStats. Ver pipeline.py."""
 import argparse
+import sys
 
-from app.db.models import Base
-from app.db.session import SessionLocal, engine
+from app.db.init_db import create_tables
+from app.db.session import SessionLocal
 from app.ingestion.http import PoliteClient
 from app.ingestion.ufcstats.pipeline import UFCStatsIngestor
 
@@ -14,7 +15,8 @@ def main() -> None:
     parser.add_argument("--delay", type=float, default=2.0, help="segundos entre peticiones")
     args = parser.parse_args()
 
-    Base.metadata.create_all(engine)  # por si aún no existen las tablas
+    if not create_tables():  # por si aún no existen; avisa si PostgreSQL no responde
+        sys.exit(1)
     client = PoliteClient(cache_dir="cache/ufcstats", min_interval=args.delay)
     with SessionLocal() as session:
         ingestor = UFCStatsIngestor(client, session)
